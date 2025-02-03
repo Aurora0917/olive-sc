@@ -1,5 +1,7 @@
 use anchor_lang::prelude::*;
+use instructions::*;
 
+pub mod instructions;
 declare_id!("DYTHL9fkyWvVEMUPeUZWqVtDMNv8joYdvTD21UWhKkeN");
 
 #[program]
@@ -7,10 +9,6 @@ pub mod option_contract {
     use super::*;
 
     pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
-        msg!("Greetings from: {:?}", ctx.program_id);
-        Ok(())
+        instructions::initialize::initialize(ctx)
     }
 }
-
-#[derive(Accounts)]
-pub struct Initialize {}
