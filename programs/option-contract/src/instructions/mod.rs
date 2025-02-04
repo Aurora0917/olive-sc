@@ -1,7 +1,7 @@
 pub use initialize::*;
-pub use withdraw::*;
-pub use deposit::*;
+pub use withdrawusdc::*;
+pub use depositwsol::*;
 
 pub mod initialize;
-pub mod withdraw;
-pub mod deposit;
+pub mod withdrawusdc;
+pub mod depositwsol;

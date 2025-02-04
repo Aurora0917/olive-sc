@@ -16,11 +16,11 @@ pub mod option_contract {
         instructions::initialize::initialize(ctx)
     }
 
-    pub fn withdraw(ctx: Context<Widthdraw>, amount: u64, iswsol: bool) -> Result<()> {
-        instructions::withdraw::withdraw(ctx, amount, iswsol)
+    pub fn withdraw_usdc(ctx: Context<WithdrawUsdc>, amount: u64, bump: u8) -> Result<()> {
+        instructions::withdrawusdc::withdraw_usdc(ctx, amount, bump)
     }
 
-    pub fn deposit(ctx: Context<Deposit>, amount: u64, iswsol: bool) -> Result<()> {
-        instructions::deposit::deposit(ctx, amount, iswsol)
+    pub fn deposit_wsol(ctx: Context<DepositWsol>, amount: u64) -> Result<()> {
+        instructions::depositwsol::deposit_wsol(ctx, amount)
     }
 }

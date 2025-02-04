@@ -1,6 +1,9 @@
 use anchor_lang::prelude::*;
-use crate::utils::*;
-use crate::state::{lp::*, Users};
+use crate::state::{lp::*, LockedLP, Users};
+use anchor_spl::{
+  associated_token::AssociatedToken,
+  token::{Token, Mint, TokenAccount}
+};
 
 pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
   let lp = &mut ctx.accounts.lp;
@@ -26,6 +29,9 @@ pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
 pub struct Initialize<'info> {
   #[account(mut)]
   pub signer: Signer<'info>,
+
+  pub wsol_mint: Account<'info, Mint>,
+  pub usdc_mint: Account<'info, Mint>,
 
   #[account(
     init, 
@@ -54,6 +60,23 @@ pub struct Initialize<'info> {
   )]
   pub users: Account<'info, Users>,
 
-  system_program: Program<'info, System>,
+  #[account(
+    init,
+    payer = signer,
+    associated_token::mint = wsol_mint,
+    associated_token::authority = lp,
+  )]
+  pub wsol_ata: Account<'info, TokenAccount>,
 
+  #[account(
+    init,
+    payer = signer,
+    associated_token::mint = usdc_mint,
+    associated_token::authority = lp,
+  )]
+  pub usdc_ata: Account<'info, TokenAccount>,
+
+  pub token_program: Program<'info, Token>,
+  pub associated_token_program: Program<'info, AssociatedToken>,
+  pub system_program: Program<'info, System>,
 }
