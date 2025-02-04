@@ -1,5 +1,4 @@
 use anchor_lang::prelude::*;
-use solana_program::pubkey::Pubkey;
 
 #[account]
 pub struct User {

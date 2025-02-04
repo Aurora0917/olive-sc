@@ -12,7 +12,7 @@ pub struct Option {
     pub profit: u64,
     pub profit_unit: bool, // sol - 1, usdc - 0
     pub premium: u64,
-    pub premium: bool, // sol - 1, usdc - 0
+    pub premium_unit: bool, // sol - 1, usdc - 0
 }
 
 impl Option {

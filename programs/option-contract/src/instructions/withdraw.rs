@@ -2,11 +2,10 @@ use anchor_lang::prelude::*;
 use crate::utils::*;
 use crate::state::{lp::*, Users};
 
-pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
-  let lp = &mut ctx.accounts.lp;
-  let locked_lp = &mut ctx.accounts.locked_lp;
-  let users = &mut ctx.accounts.users;
-  let signer = &ctx.accounts.signer;
+pub fn withdraw(ctx: Context<Withdraw>, amount: u64, iswsol: bool) -> Result<()> {
+  let lp = &ctx.accounts.lp;
+  let locked_lp = &ctx.accounts.locked_lp;
+  let users = &ctx.accounts.users;
 
   lp.sol_amount = 0;
   lp.usdc_amount = 0;
@@ -16,14 +15,13 @@ pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
 
   users.user_count= 0;
   users.max_count = 10;
-  users.admin = signer.key();
 
-
+  
   Ok(())
 }
 
 #[derive(Accounts)]
-pub struct Initialize<'info> {
+pub struct Withdraw<'info> {
   #[account(mut)]
   pub signer: Signer<'info>,
 

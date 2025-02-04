@@ -15,4 +15,12 @@ pub mod option_contract {
     pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
         instructions::initialize::initialize(ctx)
     }
+
+    pub fn withdraw(ctx: Context<Widthdraw>, amount: u64, iswsol: bool) -> Result<()> {
+        instructions::withdraw::withdraw(ctx, amount, iswsol)
+    }
+
+    pub fn deposit(ctx: Context<Deposit>, amount: u64, iswsol: bool) -> Result<()> {
+        instructions::deposit::deposit(ctx, amount, iswsol)
+    }
 }
