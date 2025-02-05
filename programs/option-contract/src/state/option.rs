@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 
 #[account]
-pub struct Option {
+pub struct OptionDetail {
     pub index: u64,
     pub sol_amount: u64,
     pub usdc_amount: u64,
@@ -15,6 +15,6 @@ pub struct Option {
     pub premium_unit: bool, // sol - 1, usdc - 0
 }
 
-impl Option {
+impl OptionDetail {
     pub const LEN: usize = 8 + 8 + 8 + 8 + 8 + 1 + 8 + 8 + 1 + 8 + 1 + 8;
 }
