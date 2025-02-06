@@ -14,7 +14,6 @@ pub fn sell_option(
 ) -> Result<()> {
     // TODO: check signer's balance for premium, option_index == user.option_index+1
 
-
     let signer = &ctx.accounts.signer;
     let signer_ata = &mut ctx.accounts.signer_ata;
     let lp_ata = &mut ctx.accounts.lp_ata;
@@ -31,9 +30,11 @@ pub fn sell_option(
     let ratio = strike / price;
     let premium = period_sqrt
         * iv
-        * if ratio > 1.0 {  // call - covered sol option
+        * if ratio > 1.0 {
+            // call - covered sol option
             price / strike
-        } else { // put - cash secured usdc option
+        } else {
+            // put - cash secured usdc option
             strike / price
         };
 
@@ -55,9 +56,9 @@ pub fn sell_option(
     option_detail.sol_amount = amount;
     option_detail.expired_date = period as u64;
     option_detail.strike_price = strike as u64;
-    option_detail.bought_back = false;
     option_detail.premium = premium as u64;
     option_detail.premium_unit = ratio > 1.0;
+    option_detail.valid = true;
 
     // store user/users data
     user.option_index = option_index;
@@ -95,7 +96,7 @@ pub struct SellOption<'info> {
     pub lp_ata: Account<'info, TokenAccount>,
 
     #[account(
-    init,
+    init_if_needed,
     payer = signer,
     space=User::LEN,
     seeds = [b"user", signer.key().as_ref()],

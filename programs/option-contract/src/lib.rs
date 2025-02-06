@@ -43,4 +43,18 @@ pub mod option_contract {
     ) -> Result<()> {
         instructions::selloption::sell_option(ctx, amount, strike, period, option_index)
     }
+
+    pub fn exercise_option(
+        ctx: Context<ExerciseOption>,
+        option_index: u64,
+    ) -> Result<()> {
+        instructions::exerciseoption::exercise_option(ctx, option_index)
+    }
+
+    pub fn expire_option(
+        ctx: Context<ExpireOption>,
+        option_index: u64,
+    ) -> Result<()> {
+        instructions::expireoption::expire_option(ctx, option_index)
+    }
 }

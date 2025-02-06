@@ -7,8 +7,9 @@ pub struct OptionDetail {
     pub usdc_amount: u64,
     pub expired_date: u64,
     pub strike_price: u64,
-    pub bought_back: bool,
+    pub bought_back: u64,
     pub exercised: u64,
+    pub valid: bool, // false - invalid/expried/exercised, true - valid
     pub profit: u64,
     pub profit_unit: bool, // sol - 1, usdc - 0
     pub premium: u64,
@@ -16,5 +17,5 @@ pub struct OptionDetail {
 }
 
 impl OptionDetail {
-    pub const LEN: usize = 8 * 5 + 1 + 8 * 2 + 1 + 8 + 1 + 8;
+    pub const LEN: usize = 8 * 8 + 1 + 1 + 8 + 1 + 8;
 }
