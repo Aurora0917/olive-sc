@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use crate::state::{lp::*, LockedLP, Users};
+use crate::state::{lp::*, Users};
 use anchor_spl::{
   associated_token::AssociatedToken,
   token::{Token, Mint, TokenAccount}
@@ -7,18 +7,14 @@ use anchor_spl::{
 
 pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
   let lp = &mut ctx.accounts.lp;
-  let locked_lp = &mut ctx.accounts.locked_lp;
   let users = &mut ctx.accounts.users;
   let signer = &ctx.accounts.signer;
 
   lp.sol_amount = 0;
   lp.usdc_amount = 0;
+  lp.locked_sol_amount = 0;
+  lp.locked_usdc_amount = 0;
 
-  locked_lp.sol_amount = 0;
-  locked_lp.usdc_amount = 0;
-
-  users.user_count= 0;
-  users.max_count = 10;
   users.admin = signer.key();
 
 
@@ -30,8 +26,8 @@ pub struct Initialize<'info> {
   #[account(mut)]
   pub signer: Signer<'info>,
 
-  pub wsol_mint: Account<'info, Mint>,
-  pub usdc_mint: Account<'info, Mint>,
+  pub wsol_mint: Box<Account<'info, Mint>>,
+  pub usdc_mint: Box<Account<'info, Mint>>,
 
   #[account(
     init, 
@@ -40,16 +36,7 @@ pub struct Initialize<'info> {
     seeds = [b"lp"],
     bump,
   )]
-  pub lp: Account<'info, Lp>,
-
-  #[account(
-    init, 
-    payer = signer,  
-    space=LockedLP::LEN,
-    seeds = [b"lockedlp"],
-    bump,
-  )]
-  pub locked_lp: Account<'info, LockedLP>,
+  pub lp: Box<Account<'info, Lp>>,
 
   #[account(
     init, 
@@ -58,7 +45,7 @@ pub struct Initialize<'info> {
     seeds = [b"users"],
     bump,
   )]
-  pub users: Account<'info, Users>,
+  pub users: Box<Account<'info, Users>>,
 
   #[account(
     init,
@@ -66,7 +53,7 @@ pub struct Initialize<'info> {
     associated_token::mint = wsol_mint,
     associated_token::authority = lp,
   )]
-  pub wsol_ata: Account<'info, TokenAccount>,
+  pub wsol_ata: Box<Account<'info, TokenAccount>>,
 
   #[account(
     init,
@@ -74,7 +61,7 @@ pub struct Initialize<'info> {
     associated_token::mint = usdc_mint,
     associated_token::authority = lp,
   )]
-  pub usdc_ata: Account<'info, TokenAccount>,
+  pub usdc_ata: Box<Account<'info, TokenAccount>>,
 
   pub token_program: Program<'info, Token>,
   pub associated_token_program: Program<'info, AssociatedToken>,

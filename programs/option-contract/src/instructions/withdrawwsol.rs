@@ -14,6 +14,7 @@ pub fn withdraw_wsol(ctx: Context<WithdrawWsol>, amount: u64, bump:u8) -> Result
 
   //TODO: balance check : lp_ata balance > amount
 
+  lp.sol_amount -= amount;
   token::transfer(
     CpiContext::new_with_signer(
         token_program.to_account_info(),

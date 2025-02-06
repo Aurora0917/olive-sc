@@ -16,5 +16,5 @@ pub struct OptionDetail {
 }
 
 impl OptionDetail {
-    pub const LEN: usize = 8 + 8 + 8 + 8 + 8 + 1 + 8 + 8 + 1 + 8 + 1 + 8;
+    pub const LEN: usize = 8 * 5 + 1 + 8 * 2 + 1 + 8 + 1 + 8;
 }

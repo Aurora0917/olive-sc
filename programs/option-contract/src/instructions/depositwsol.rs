@@ -9,6 +9,7 @@ pub fn deposit_wsol(ctx: Context<DepositWsol>, amount: u64) -> Result<()> {
   let signer = &ctx.accounts.signer;
   let signer_ata = &mut ctx.accounts.signer_ata;
   let lp_ata = &mut ctx.accounts.lp_ata;
+  let lp = &mut ctx.accounts.lp;
   let token_program = &ctx.accounts.token_program;
   
   //TODO: balance check : signer_ata balance > amount
@@ -24,7 +25,7 @@ pub fn deposit_wsol(ctx: Context<DepositWsol>, amount: u64) -> Result<()> {
     ),
     amount,
   )?;
-  
+  lp.sol_amount += amount;
   Ok(())
 }
 
@@ -50,6 +51,7 @@ pub struct DepositWsol<'info> {
   pub lp: Account<'info, Lp>,
 
   #[account(
+    mut,
     associated_token::mint = wsol_mint,
     associated_token::authority = lp,
   )]

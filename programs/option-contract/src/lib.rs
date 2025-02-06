@@ -1,3 +1,5 @@
+#![allow(unexpected_cfgs)]
+
 use anchor_lang::prelude::*;
 use instructions::*;
 
@@ -30,5 +32,15 @@ pub mod option_contract {
 
     pub fn deposit_usdc(ctx: Context<DepositUsdc>, amount: u64) -> Result<()> {
         instructions::depositusdc::deposit_usdc(ctx, amount)
+    }
+
+    pub fn sell_option(
+        ctx: Context<SellOption>,
+        amount: u64,
+        strike: f64,
+        period: f64,
+        option_index: u64,
+    ) -> Result<()> {
+        instructions::selloption::sell_option(ctx, amount, strike, period, option_index)
     }
 }
