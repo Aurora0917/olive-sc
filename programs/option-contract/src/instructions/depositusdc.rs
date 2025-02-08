@@ -11,9 +11,10 @@ pub fn deposit_usdc(ctx: Context<DepositUsdc>, amount: u64) -> Result<()> {
   let lp_ata = &mut ctx.accounts.lp_ata;
   let lp = &mut ctx.accounts.lp;
   let token_program = &ctx.accounts.token_program;
-  
-  //TODO: balance check : signer_ata balance > amount
 
+  require_gte!(signer_ata.amount, amount);
+   // TODO: Check Admin to withdraw and deposit to pool
+  
   token::transfer(
     CpiContext::new(
         token_program.to_account_info(),

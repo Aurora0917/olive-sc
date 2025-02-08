@@ -6,7 +6,7 @@ pub struct OptionDetail {
     pub sol_amount: u64,
     pub usdc_amount: u64,
     pub expired_date: u64,
-    pub strike_price: u64,
+    pub strike_price: f64,
     pub bought_back: u64,
     pub exercised: u64,
     pub valid: bool, // false - invalid/expried/exercised, true - valid

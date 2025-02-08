@@ -57,4 +57,12 @@ pub mod option_contract {
     ) -> Result<()> {
         instructions::expireoption::expire_option(ctx, option_index)
     }
+
+    pub fn buy_option(
+        ctx: Context<BuyOption>,
+        option_index: u64,
+        bump: u8
+    ) -> Result<()> {
+        instructions::buyoption::buy_option(ctx, option_index, bump)
+    }
 }

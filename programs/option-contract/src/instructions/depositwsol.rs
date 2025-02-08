@@ -12,8 +12,9 @@ pub fn deposit_wsol(ctx: Context<DepositWsol>, amount: u64) -> Result<()> {
   let lp = &mut ctx.accounts.lp;
   let token_program = &ctx.accounts.token_program;
   
-  //TODO: balance check : signer_ata balance > amount
-
+  require_gte!(signer_ata.amount, amount);
+ // TODO: Check Admin to withdraw and deposit to pool
+  
   token::transfer(
     CpiContext::new(
         token_program.to_account_info(),
