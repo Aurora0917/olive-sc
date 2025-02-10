@@ -1,4 +1,8 @@
-use crate::{state::{Lp, OptionDetail, User}, utils::SOL_PRICE_ID};
+use crate::{
+    errors::OptionError,
+    state::{Lp, OptionDetail, User},
+    utils::SOL_PRICE_ID,
+};
 use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken,
@@ -13,26 +17,44 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, option_index: u64) -> Resul
     let lp_ata_usdc = &mut ctx.accounts.lp_ata_usdc;
     let lp_ata_wsol = &mut ctx.accounts.lp_ata_wsol;
     let price_update = &mut ctx.accounts.price_update;
-
+    let lp = &mut ctx.accounts.lp;
     let token_program = &ctx.accounts.token_program;
     let option_detail = &mut ctx.accounts.option_detail;
 
     let current_timestamp = Clock::get().unwrap().unix_timestamp;
 
-    require_eq!(option_index, option_detail.index);
-    require_gt!(option_detail.expired_date, current_timestamp as u64);
+    require_eq!(
+        option_index,
+        option_detail.index,
+        OptionError::InvalidOptionIndexError
+    );
+    require_gt!(
+        option_detail.expired_date,
+        current_timestamp as u64,
+        OptionError::InvalidTimeError
+    );
 
-    // TODO: get price from oracle
     let feed_id: [u8; 32] = get_feed_id_from_hex(SOL_PRICE_ID)?;
     let price = price_update.get_price_no_older_than(&Clock::get()?, 30, &feed_id)?;
-
-
     let oracle_price = (price.price as f64) * 10f64.powi(price.exponent);
-
     let amount: f64;
-    if option_detail.sol_amount > 0 {
+    if option_detail.option_type {
+        require_gte!(
+            oracle_price,
+            option_detail.strike_price,
+            OptionError::InvalidPriceRequirementError
+        );
+        require_gte!(
+            lp.locked_sol_amount,
+            option_detail.sol_amount,
+            OptionError::InvalidLockedBalanceError
+        );
+        lp.locked_sol_amount -= option_detail.sol_amount;
+        lp.sol_amount += option_detail.sol_amount;
+
         // call / covered sol
-        amount = ((oracle_price - option_detail.strike_price) / option_detail.strike_price) * (option_detail.sol_amount as f64);
+        amount = ((oracle_price - option_detail.strike_price) / option_detail.strike_price)
+            * (option_detail.sol_amount as f64);
 
         // send profit to user
         token::transfer(
@@ -51,9 +73,24 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, option_index: u64) -> Resul
         option_detail.valid = false;
         option_detail.profit = amount as u64;
         option_detail.profit_unit = true;
-    } else if option_detail.usdc_amount > 0 {
+    } else {
+        require_gte!(
+            option_detail.strike_price,
+            oracle_price,
+            OptionError::InvalidPriceRequirementError
+        );
+
+        require_gte!(
+            lp.locked_usdc_amount,
+            option_detail.usdc_amount,
+            OptionError::InvalidLockedBalanceError
+        );
+        lp.locked_usdc_amount -= option_detail.usdc_amount;
+        lp.usdc_amount += option_detail.usdc_amount;
+
         // put / case-secured usdc
-        amount = (option_detail.strike_price - oracle_price) / oracle_price * (option_detail.usdc_amount as f64);
+        amount = (option_detail.strike_price - oracle_price) / oracle_price
+            * (option_detail.usdc_amount as f64);
 
         // send profit to user
         token::transfer(
@@ -73,7 +110,6 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, option_index: u64) -> Resul
         option_detail.profit = amount as u64;
         option_detail.profit_unit = false;
     }
-
     Ok(())
 }
 

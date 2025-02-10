@@ -1,6 +1,9 @@
 use std::ops::{Div, Mul};
 
-use crate::state::{Lp, OptionDetail, User};
+use crate::{
+    errors::OptionError,
+    state::{Lp, OptionDetail, User},
+};
 use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken,
@@ -15,16 +18,40 @@ pub fn buy_option(ctx: Context<BuyOption>, option_index: u64, lp_bump: u8) -> Re
     let lp = &mut ctx.accounts.lp;
     let token_program = &ctx.accounts.token_program;
     let option_detail = &mut ctx.accounts.option_detail;
-    let user = &mut ctx.accounts.user;
     let current_timestamp = Clock::get().unwrap().unix_timestamp;
 
-    require_eq!(option_index, option_detail.index);
-    require_gte!(user.option_index, option_index);
+    require_eq!(
+        option_index,
+        option_detail.index,
+        OptionError::InvalidOptionIndexError
+    );
 
     if option_detail.valid == true {
         let amount = option_detail.premium.mul(9).div(10);
+
+        if option_detail.option_type {
+            require_gte!(
+                lp.locked_sol_amount,
+                option_detail.sol_amount,
+                OptionError::InvalidLockedBalanceError
+            );
+            lp.locked_sol_amount -= option_detail.sol_amount;
+            lp.sol_amount += option_detail.sol_amount;
+        } else {
+            require_gte!(
+                lp.locked_usdc_amount,
+                option_detail.usdc_amount,
+                OptionError::InvalidLockedBalanceError
+            );
+            lp.locked_usdc_amount -= option_detail.usdc_amount;
+            lp.usdc_amount += option_detail.usdc_amount;
+        }
         if option_detail.premium_unit == true {
-          require_gte!(lp_ata_wsol.amount, amount);
+            require_gte!(
+                lp_ata_wsol.amount,
+                amount,
+                OptionError::InvalidPoolBalanceError
+            );
             token::transfer(
                 CpiContext::new_with_signer(
                     token_program.to_account_info(),
@@ -38,23 +65,27 @@ pub fn buy_option(ctx: Context<BuyOption>, option_index: u64, lp_bump: u8) -> Re
                 amount,
             )?;
         } else {
-          require_gte!(lp_ata_usdc.amount, amount);
-          token::transfer(
-            CpiContext::new_with_signer(
-                token_program.to_account_info(),
-                SplTransfer {
-                    from: lp_ata_usdc.to_account_info(),
-                    to: signer_ata_usdc.to_account_info(),
-                    authority: lp.to_account_info(),
-                },
-                &[&[b"lp", &[lp_bump]]],
-            ),
-            amount,
-        )?;
+            require_gte!(
+                lp_ata_usdc.amount,
+                amount,
+                OptionError::InvalidPoolBalanceError
+            );
+            token::transfer(
+                CpiContext::new_with_signer(
+                    token_program.to_account_info(),
+                    SplTransfer {
+                        from: lp_ata_usdc.to_account_info(),
+                        to: signer_ata_usdc.to_account_info(),
+                        authority: lp.to_account_info(),
+                    },
+                    &[&[b"lp", &[lp_bump]]],
+                ),
+                amount,
+            )?;
         }
+        option_detail.valid = false;
+        option_detail.bought_back = current_timestamp as u64;
     }
-    option_detail.valid = false;
-    option_detail.bought_back = current_timestamp as u64;
 
     Ok(())
 }

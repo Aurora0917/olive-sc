@@ -38,31 +38,31 @@ pub mod option_contract {
         ctx: Context<SellOption>,
         amount: u64,
         strike: f64,
-        period: f64,
+        period: u64,
         option_index: u64,
+        is_call: bool,
+        pay_sol: bool,
     ) -> Result<()> {
-        instructions::selloption::sell_option(ctx, amount, strike, period, option_index)
+        instructions::selloption::sell_option(
+            ctx,
+            amount,
+            strike,
+            period as f64,
+            option_index,
+            is_call,
+            pay_sol,
+        )
     }
 
-    pub fn exercise_option(
-        ctx: Context<ExerciseOption>,
-        option_index: u64,
-    ) -> Result<()> {
+    pub fn exercise_option(ctx: Context<ExerciseOption>, option_index: u64) -> Result<()> {
         instructions::exerciseoption::exercise_option(ctx, option_index)
     }
 
-    pub fn expire_option(
-        ctx: Context<ExpireOption>,
-        option_index: u64,
-    ) -> Result<()> {
+    pub fn expire_option(ctx: Context<ExpireOption>, option_index: u64) -> Result<()> {
         instructions::expireoption::expire_option(ctx, option_index)
     }
 
-    pub fn buy_option(
-        ctx: Context<BuyOption>,
-        option_index: u64,
-        bump: u8
-    ) -> Result<()> {
+    pub fn buy_option(ctx: Context<BuyOption>, option_index: u64, bump: u8) -> Result<()> {
         instructions::buyoption::buy_option(ctx, option_index, bump)
     }
 }
