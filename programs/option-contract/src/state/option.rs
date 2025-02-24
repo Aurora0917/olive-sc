@@ -6,6 +6,7 @@ pub struct OptionDetail {
     pub sol_amount: u64,
     pub usdc_amount: u64,
     pub expired_date: u64,
+    pub period: u64,
     pub strike_price: f64,
     pub bought_back: u64,
     pub exercised: u64,
@@ -18,5 +19,5 @@ pub struct OptionDetail {
 }
 
 impl OptionDetail {
-    pub const LEN: usize = 8 * 8 + 1 + 1 + 8 + 1 * 2 + 8;
+    pub const LEN: usize = 8 * 9 + 1 + 1 + 8 + 1 * 2 + 8;
 }

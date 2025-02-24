@@ -39,6 +39,7 @@ pub mod option_contract {
         amount: u64,
         strike: f64,
         period: u64,
+        expired_time: u64,
         option_index: u64,
         is_call: bool,
         pay_sol: bool,
@@ -47,19 +48,29 @@ pub mod option_contract {
             ctx,
             amount,
             strike,
-            period as f64,
+            period,
+            expired_time,
             option_index,
             is_call,
             pay_sol,
         )
     }
 
-    pub fn exercise_option(ctx: Context<ExerciseOption>, option_index: u64) -> Result<()> {
-        instructions::exerciseoption::exercise_option(ctx, option_index)
+    pub fn exercise_option(
+        ctx: Context<ExerciseOption>,
+        option_index: u64,
+        bump: u8,
+    ) -> Result<()> {
+        instructions::exerciseoption::exercise_option(ctx, option_index, bump)
     }
 
-    pub fn expire_option(ctx: Context<ExpireOption>, option_index: u64) -> Result<()> {
-        instructions::expireoption::expire_option(ctx, option_index)
+    pub fn expire_option(
+        ctx: Context<ExpireOption>,
+        option_index: u64,
+        price: f64,
+        bump: u8,
+    ) -> Result<()> {
+        instructions::expireoption::expire_option(ctx, option_index, price, bump)
     }
 
     pub fn buy_option(ctx: Context<BuyOption>, option_index: u64, bump: u8) -> Result<()> {

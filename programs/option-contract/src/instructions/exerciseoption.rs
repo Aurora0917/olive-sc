@@ -10,8 +10,7 @@ use anchor_spl::{
 };
 use pyth_solana_receiver_sdk::price_update::{get_feed_id_from_hex, PriceUpdateV2};
 
-pub fn exercise_option(ctx: Context<ExerciseOption>, option_index: u64) -> Result<()> {
-    let signer = &ctx.accounts.signer;
+pub fn exercise_option(ctx: Context<ExerciseOption>, option_index: u64, lp_bump: u8) -> Result<()> {
     let signer_ata_wsol = &mut ctx.accounts.signer_ata_wsol;
     let signer_ata_usdc = &mut ctx.accounts.signer_ata_usdc;
     let lp_ata_usdc = &mut ctx.accounts.lp_ata_usdc;
@@ -58,13 +57,14 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, option_index: u64) -> Resul
 
         // send profit to user
         token::transfer(
-            CpiContext::new(
+            CpiContext::new_with_signer(
                 token_program.to_account_info(),
                 SplTransfer {
                     from: lp_ata_wsol.to_account_info(),
                     to: signer_ata_wsol.to_account_info(),
-                    authority: signer.to_account_info(),
+                    authority: lp.to_account_info(),
                 },
+                &[&[b"lp", &[lp_bump]]],
             ),
             amount as u64,
         )?;
@@ -94,13 +94,14 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, option_index: u64) -> Resul
 
         // send profit to user
         token::transfer(
-            CpiContext::new(
+            CpiContext::new_with_signer(
                 token_program.to_account_info(),
                 SplTransfer {
                     from: lp_ata_usdc.to_account_info(),
                     to: signer_ata_usdc.to_account_info(),
-                    authority: signer.to_account_info(),
+                    authority: lp.to_account_info(),
                 },
+                &[&[b"lp", &[lp_bump]]],
             ),
             amount as u64,
         )?;
@@ -114,7 +115,7 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, option_index: u64) -> Resul
 }
 
 #[derive(Accounts)]
-#[instruction(option_index: u64)]
+#[instruction(option_index: u64, lp_bump: u8)]
 pub struct ExerciseOption<'info> {
     #[account(mut)]
     pub signer: Signer<'info>,
@@ -127,18 +128,18 @@ pub struct ExerciseOption<'info> {
     associated_token::mint = wsol_mint,
     associated_token::authority = signer,
   )]
-    pub signer_ata_wsol: Account<'info, TokenAccount>,
+    pub signer_ata_wsol: Box<Account<'info, TokenAccount>>,
 
     #[account(
       mut,
       associated_token::mint = usdc_mint,
       associated_token::authority = signer,
     )]
-    pub signer_ata_usdc: Account<'info, TokenAccount>,
+    pub signer_ata_usdc: Box<Account<'info, TokenAccount>>,
 
     #[account(
     seeds = [b"lp"],
-    bump,
+    bump = lp_bump,
   )]
     pub lp: Account<'info, Lp>,
 
@@ -146,13 +147,13 @@ pub struct ExerciseOption<'info> {
     associated_token::mint = wsol_mint,
     associated_token::authority = lp,
   )]
-    pub lp_ata_wsol: Account<'info, TokenAccount>,
+    pub lp_ata_wsol: Box<Account<'info, TokenAccount>>,
 
     #[account(
       associated_token::mint = usdc_mint,
       associated_token::authority = lp,
     )]
-    pub lp_ata_usdc: Account<'info, TokenAccount>,
+    pub lp_ata_usdc: Box<Account<'info, TokenAccount>>,
 
     #[account(
     seeds = [b"user", signer.key().as_ref()],

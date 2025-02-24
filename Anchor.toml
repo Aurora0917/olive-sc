@@ -11,7 +11,7 @@ option_contract = "DYTHL9fkyWvVEMUPeUZWqVtDMNv8joYdvTD21UWhKkeN"
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "Localnet"
+cluster = "Devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]

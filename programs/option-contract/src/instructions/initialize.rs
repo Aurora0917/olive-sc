@@ -36,7 +36,7 @@ pub struct Initialize<'info> {
     seeds = [b"lp"],
     bump,
   )]
-  pub lp: Box<Account<'info, Lp>>,
+  pub lp: Account<'info, Lp>,
 
   #[account(
     init, 
@@ -66,5 +66,4 @@ pub struct Initialize<'info> {
   pub token_program: Program<'info, Token>,
   pub associated_token_program: Program<'info, AssociatedToken>,
   pub system_program: Program<'info, System>,
-  pub rent: Sysvar<'info, Rent>,
 }

@@ -6,5 +6,5 @@ pub struct Users {
 }
 
 impl Users {
-    pub const LEN: usize = 8 + 8;
+    pub const LEN: usize = 32 + 8;
 }

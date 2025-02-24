@@ -16,7 +16,8 @@ pub fn sell_option(
     ctx: Context<SellOption>,
     amount: u64,
     strike: f64,
-    period: f64,
+    period: u64, // number day
+    expired_time: u64, // when the option is expired
     option_index: u64,
     is_call: bool, // true : call option, false : put option
     pay_sol: bool, // true : sol, false : usdc
@@ -44,7 +45,7 @@ pub fn sell_option(
     let oracle_price = (price.price as f64) * 10f64.powi(price.exponent);
 
     //calc premium
-    let period_sqrt = period.sqrt(); // Using floating-point sqrt
+    let period_sqrt = (period as f64).sqrt(); // Using floating-point sqrt
     let iv = 0.6;
     let premium = period_sqrt
         * iv
@@ -108,7 +109,8 @@ pub fn sell_option(
     // store option data
     option_detail.index = option_index;
     option_detail.sol_amount = amount;
-    option_detail.expired_date = period as u64;
+    option_detail.period = period;
+    option_detail.expired_date = expired_time as u64;
     option_detail.strike_price = strike;
     option_detail.premium = premium as u64;
     option_detail.premium_unit = pay_sol;
