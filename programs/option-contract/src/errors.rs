@@ -12,7 +12,7 @@ pub enum OptionError {
 
 #[error_code]
 pub enum PoolError {
-    AdminAuthorityError,
+    InvalidWithdrawError,
     InvalidPoolBalanceError,
     InvalidSignerBalanceError,
 }

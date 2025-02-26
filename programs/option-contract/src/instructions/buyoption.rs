@@ -121,24 +121,28 @@ pub struct BuyOption<'info> {
     pub lp: Account<'info, Lp>,
 
     #[account(
+        mut,
   associated_token::mint = wsol_mint,
   associated_token::authority = lp,
 )]
     pub lp_ata_wsol: Account<'info, TokenAccount>,
 
     #[account(
+        mut,
     associated_token::mint = usdc_mint,
     associated_token::authority = lp,
   )]
     pub lp_ata_usdc: Account<'info, TokenAccount>,
 
     #[account(
+        mut,
   seeds = [b"user", signer.key().as_ref()],
   bump,
 )]
     pub user: Box<Account<'info, User>>,
 
     #[account(
+        mut,
     seeds = [b"option", signer.key().as_ref(), &option_index.to_le_bytes()[..]],
     bump,
   )]

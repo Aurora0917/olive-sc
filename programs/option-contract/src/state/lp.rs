@@ -6,8 +6,9 @@ pub struct Lp {
     pub usdc_amount: u64,
     pub locked_sol_amount: u64,
     pub locked_usdc_amount: u64,
+    pub dump: u8,
 }
 
 impl Lp {
-    pub const LEN: usize = 8 * 4 + 8;
+    pub const LEN: usize = 8 * 4 + 1 + 8;
 }

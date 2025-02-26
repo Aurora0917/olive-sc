@@ -3,20 +3,19 @@ use std::ops::Div;
 use crate::{
     errors::OptionError,
     state::{Lp, OptionDetail, User},
-    utils::SOL_PRICE_ID,
 };
 use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken,
     token::{self, Mint, Token, TokenAccount, Transfer as SplTransfer},
 };
-use pyth_solana_receiver_sdk::price_update::{get_feed_id_from_hex, PriceUpdateV2};
+use pyth_sdk_solana::{state::SolanaPriceAccount, PriceFeed};
 
 pub fn sell_option(
     ctx: Context<SellOption>,
     amount: u64,
     strike: f64,
-    period: u64, // number day
+    period: u64,       // number day
     expired_time: u64, // when the option is expired
     option_index: u64,
     is_call: bool, // true : call option, false : put option
@@ -37,12 +36,14 @@ pub fn sell_option(
         user.option_index + 1,
         OptionError::InvalidOptionIndexError
     );
-
-    let price_update = &mut ctx.accounts.price_update;
-    let feed_id: [u8; 32] = get_feed_id_from_hex(SOL_PRICE_ID)?;
-    let price = price_update.get_price_no_older_than(&Clock::get()?, 30, &feed_id)?;
-
-    let oracle_price = (price.price as f64) * 10f64.powi(price.exponent);
+    let current_timestamp = Clock::get().unwrap().unix_timestamp;
+    let price_account_info = &ctx.accounts.pyth_price_account;
+    let price_feed: PriceFeed =
+        SolanaPriceAccount::account_info_to_feed(price_account_info).unwrap();
+    let price = price_feed
+        .get_price_no_older_than(current_timestamp, 60)
+        .unwrap(); // Ensure price is not older than 60 seconds
+    let oracle_price = (price.price as f64) * 10f64.powi(price.expo);
 
     //calc premium
     let period_sqrt = (period as f64).sqrt(); // Using floating-point sqrt
@@ -145,18 +146,21 @@ pub struct SellOption<'info> {
     pub signer_ata_usdc: Box<Account<'info, TokenAccount>>,
 
     #[account(
+        mut,
     seeds = [b"lp"],
     bump,
   )]
     pub lp: Box<Account<'info, Lp>>,
 
     #[account(
+        mut,
     associated_token::mint = wsol_mint,
     associated_token::authority = lp,
   )]
     pub lp_ata_wsol: Box<Account<'info, TokenAccount>>,
 
     #[account(
+        mut,
       associated_token::mint = wsol_mint,
       associated_token::authority = lp,
     )]
@@ -179,7 +183,8 @@ pub struct SellOption<'info> {
       bump,
     )]
     pub option_detail: Box<Account<'info, OptionDetail>>,
-    pub price_update: Account<'info, PriceUpdateV2>,
+    /// CHECK:
+    pub pyth_price_account: AccountInfo<'info>,
 
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,

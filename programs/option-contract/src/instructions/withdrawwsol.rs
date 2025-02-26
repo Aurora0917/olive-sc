@@ -6,20 +6,17 @@ use anchor_spl::{
 
 use crate::{
     errors::PoolError,
-    state::{Lp, Users},
+    state::Lp,
 };
 
 pub fn withdraw_wsol(ctx: Context<WithdrawWsol>, amount: u64, lp_bump: u8) -> Result<()> {
-    let signer = &mut ctx.accounts.signer;
     let signer_ata = &mut ctx.accounts.signer_ata;
     let lp_ata = &mut ctx.accounts.lp_ata;
     let lp = &mut ctx.accounts.lp;
-    let users = &mut ctx.accounts.users;
 
     let token_program = &ctx.accounts.token_program;
 
     require_gte!(lp_ata.amount, amount, PoolError::InvalidPoolBalanceError);
-    require_keys_eq!(users.admin, signer.key(), PoolError::AdminAuthorityError);
 
     lp.sol_amount -= amount;
     token::transfer(
@@ -61,16 +58,11 @@ pub struct WithdrawWsol<'info> {
     pub lp: Account<'info, Lp>,
 
     #[account(
+      mut,
     associated_token::mint = wsol_mint,
     associated_token::authority = lp,
   )]
     pub lp_ata: Account<'info, TokenAccount>,
-
-    #[account(
-    seeds = [b"users"],
-    bump,
-  )]
-    pub users: Box<Account<'info, Users>>,
 
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,

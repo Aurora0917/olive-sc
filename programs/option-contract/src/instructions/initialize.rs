@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use crate::state::{lp::*, Users};
+use crate::state::lp::*;
 use anchor_spl::{
   associated_token::AssociatedToken,
   token::{Token, Mint, TokenAccount}
@@ -7,16 +7,11 @@ use anchor_spl::{
 
 pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
   let lp = &mut ctx.accounts.lp;
-  let users = &mut ctx.accounts.users;
-  let signer = &ctx.accounts.signer;
 
   lp.sol_amount = 0;
   lp.usdc_amount = 0;
   lp.locked_sol_amount = 0;
   lp.locked_usdc_amount = 0;
-
-  users.admin = signer.key();
-
 
   Ok(())
 }
@@ -37,15 +32,6 @@ pub struct Initialize<'info> {
     bump,
   )]
   pub lp: Account<'info, Lp>,
-
-  #[account(
-    init, 
-    payer = signer,  
-    space=Users::LEN,
-    seeds = [b"users"],
-    bump,
-  )]
-  pub users: Box<Account<'info, Users>>,
 
   #[account(
     init,

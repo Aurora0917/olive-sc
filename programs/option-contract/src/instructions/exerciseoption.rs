@@ -1,24 +1,23 @@
 use crate::{
     errors::OptionError,
     state::{Lp, OptionDetail, User},
-    utils::SOL_PRICE_ID,
 };
 use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken,
     token::{self, Mint, Token, TokenAccount, Transfer as SplTransfer},
 };
-use pyth_solana_receiver_sdk::price_update::{get_feed_id_from_hex, PriceUpdateV2};
+use pyth_sdk_solana::{state::SolanaPriceAccount, PriceFeed};
 
 pub fn exercise_option(ctx: Context<ExerciseOption>, option_index: u64, lp_bump: u8) -> Result<()> {
     let signer_ata_wsol = &mut ctx.accounts.signer_ata_wsol;
     let signer_ata_usdc = &mut ctx.accounts.signer_ata_usdc;
     let lp_ata_usdc = &mut ctx.accounts.lp_ata_usdc;
     let lp_ata_wsol = &mut ctx.accounts.lp_ata_wsol;
-    let price_update = &mut ctx.accounts.price_update;
     let lp = &mut ctx.accounts.lp;
     let token_program = &ctx.accounts.token_program;
     let option_detail = &mut ctx.accounts.option_detail;
+    let price_account_info = &ctx.accounts.pyth_price_account;
 
     let current_timestamp = Clock::get().unwrap().unix_timestamp;
 
@@ -33,9 +32,14 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, option_index: u64, lp_bump:
         OptionError::InvalidTimeError
     );
 
-    let feed_id: [u8; 32] = get_feed_id_from_hex(SOL_PRICE_ID)?;
-    let price = price_update.get_price_no_older_than(&Clock::get()?, 30, &feed_id)?;
-    let oracle_price = (price.price as f64) * 10f64.powi(price.exponent);
+    let current_timestamp = Clock::get().unwrap().unix_timestamp;
+    let price_feed: PriceFeed =
+        SolanaPriceAccount::account_info_to_feed(price_account_info).unwrap();
+    let price = price_feed
+        .get_price_no_older_than(current_timestamp, 60)
+        .unwrap(); // Ensure price is not older than 60 seconds
+    let oracle_price = (price.price as f64) * 10f64.powi(price.expo);
+
     let amount: f64;
     if option_detail.option_type {
         require_gte!(
@@ -138,35 +142,41 @@ pub struct ExerciseOption<'info> {
     pub signer_ata_usdc: Box<Account<'info, TokenAccount>>,
 
     #[account(
+        mut,
     seeds = [b"lp"],
     bump = lp_bump,
   )]
     pub lp: Account<'info, Lp>,
 
     #[account(
+        mut,
     associated_token::mint = wsol_mint,
     associated_token::authority = lp,
   )]
     pub lp_ata_wsol: Box<Account<'info, TokenAccount>>,
 
     #[account(
+        mut,
       associated_token::mint = usdc_mint,
       associated_token::authority = lp,
     )]
     pub lp_ata_usdc: Box<Account<'info, TokenAccount>>,
 
     #[account(
+        mut,
     seeds = [b"user", signer.key().as_ref()],
     bump,
   )]
     pub user: Box<Account<'info, User>>,
 
     #[account(
+        mut,
       seeds = [b"option", signer.key().as_ref(), &option_index.to_le_bytes()[..]],
       bump,
     )]
     pub option_detail: Box<Account<'info, OptionDetail>>,
-    pub price_update: Account<'info, PriceUpdateV2>,
+    /// CHECK:
+    pub pyth_price_account: AccountInfo<'info>,
 
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,

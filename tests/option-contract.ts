@@ -34,10 +34,10 @@ describe("option-contract", () => {
   let usdcMint, ownerATA, userATA;
   let wsolMint, ownerWSOLATA, userWSOLATA;
   let userWallet = Keypair.fromSecretKey(new Uint8Array(secret));
-  console.log("userWallet", userWallet.publicKey);
 
-  usdcMint = new PublicKey(process.env.USDCMINT)
-  wsolMint = new PublicKey(process.env.WSOLMINT)
+  usdcMint = new PublicKey("4dfkxzRKJzwhWHAkJErU4YVKr8RVKESDFj5xKqGuw7Xs")
+  wsolMint = new PublicKey("AvGyRAUiWkF6fzALe1LNnzCwGbNTZ4aqyfthuEZHM5Wq")
+
   // before(async () => {
   //   //
   //   await airdropSol(
@@ -46,16 +46,16 @@ describe("option-contract", () => {
   //     5 * LAMPORTS_PER_SOL
   //   );
   //   // Initial setup - mint tokens, set up accounts
-  //   usdcMint = await createMint(
-  //     provider.connection,
-  //     localWallet,
-  //     localWallet.publicKey,
-  //     null,
-  //     6, // Adjusted decimals to 6
-  //     undefined,
-  //     {},
-  //     TOKEN_PROGRAM_ID
-  //   );
+  //   // usdcMint = await createMint(
+  //   //   provider.connection,
+  //   //   localWallet,
+  //   //   localWallet.publicKey,
+  //   //   null,
+  //   //   6, // Adjusted decimals to 6
+  //   //   undefined,
+  //   //   {},
+  //   //   TOKEN_PROGRAM_ID
+  //   // );
 
   //   // Create associated token account for owner
   //   const ownerTokenAccount = await getOrCreateAssociatedTokenAccount(
@@ -67,17 +67,17 @@ describe("option-contract", () => {
 
   //   ownerATA = ownerTokenAccount.address;
 
-  //   console.log("ownerTokenAccount:", ownerTokenAccount.address.toBase58());
+  //   console.log("ownerTokenAccount:", ownerATA.toBase58());
 
   //   // Mint tokens to owner's token account for testing
-  //   await mintTo(
-  //     provider.connection,
-  //     localWallet,
-  //     usdcMint,
-  //     ownerATA,
-  //     localWallet,
-  //     1_000_000_000 // 1,000,000 tokens (assuming 6 decimals)
-  //   );
+  //   // await mintTo(
+  //   //   provider.connection,
+  //   //   localWallet,
+  //   //   usdcMint,
+  //   //   ownerATA,
+  //   //   localWallet,
+  //   //   1_000_000_000 // 1,000,000 tokens (assuming 6 decimals)
+  //   // );
   //   // Create associated token account for user
   //   const userTokenAccount = await getOrCreateAssociatedTokenAccount(
   //     provider.connection,
@@ -90,26 +90,26 @@ describe("option-contract", () => {
   //   console.log("userATA:", userATA.toBase58());
 
   //   // Mint tokens to user's token account for testing
-  //   await mintTo(
-  //     provider.connection,
-  //     localWallet,
-  //     usdcMint,
-  //     userATA,
-  //     localWallet,
-  //     1_000_000_000 // 1,000,000 tokens
-  //   );
+  //   // await mintTo(
+  //   //   provider.connection,
+  //   //   localWallet,
+  //   //   usdcMint,
+  //   //   userATA,
+  //   //   localWallet,
+  //   //   1_000_000_000 // 1,000,000 tokens
+  //   // );
 
   //   // Initial setup - mint tokens, set up accounts
-  //   wsolMint = await createMint(
-  //     provider.connection,
-  //     localWallet,
-  //     localWallet.publicKey,
-  //     null,
-  //     6, // Adjusted decimals to 6
-  //     undefined,
-  //     {},
-  //     TOKEN_PROGRAM_ID
-  //   );
+  //   // wsolMint = await createMint(
+  //   //   provider.connection,
+  //   //   localWallet,
+  //   //   localWallet.publicKey,
+  //   //   null,
+  //   //   6, // Adjusted decimals to 6
+  //   //   undefined,
+  //   //   {},
+  //   //   TOKEN_PROGRAM_ID
+  //   // );
 
   //   // Create associated token account for owner
   //   const ownerWSOLTokenAccount = await getOrCreateAssociatedTokenAccount(
@@ -123,18 +123,18 @@ describe("option-contract", () => {
 
   //   console.log(
   //     "ownerWSOLTokenAccount:",
-  //     ownerWSOLTokenAccount.address.toBase58()
+  //     ownerWSOLATA.toBase58()
   //   );
 
   //   // Mint tokens to owner's token account for testing
-  //   await mintTo(
-  //     provider.connection,
-  //     localWallet,
-  //     wsolMint,
-  //     ownerWSOLATA,
-  //     localWallet,
-  //     1_000_000_000 // 1,000,000 tokens (assuming 6 decimals)
-  //   );
+  //   // await mintTo(
+  //   //   provider.connection,
+  //   //   localWallet,
+  //   //   wsolMint,
+  //   //   ownerWSOLATA,
+  //   //   localWallet,
+  //   //   1_000_000_000 // 1,000,000 tokens (assuming 6 decimals)
+  //   // );
 
   //   // Create associated token account for user
   //   const userWSOLTokenAccount = await getOrCreateAssociatedTokenAccount(
@@ -149,14 +149,14 @@ describe("option-contract", () => {
   //   console.log("userwsolata:", userWSOLATA.toBase58());
 
   //   // Mint tokens to user's token account for testing
-  //   await mintTo(
-  //     provider.connection,
-  //     localWallet,
-  //     wsolMint,
-  //     userWSOLATA,
-  //     localWallet,
-  //     1_000_000_000 // 1,000,000 tokens
-  //   );
+  //   // await mintTo(
+  //   //   provider.connection,
+  //   //   localWallet,
+  //   //   wsolMint,
+  //   //   userWSOLATA,
+  //   //   localWallet,
+  //   //   1_000_000_000 // 1,000,000 tokens
+  //   // );
   // });
 
   it("Is initialized!", async () => {

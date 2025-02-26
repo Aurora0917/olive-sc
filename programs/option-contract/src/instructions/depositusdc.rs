@@ -1,4 +1,7 @@
-use crate::{errors::PoolError, state::Lp};
+use crate::{
+    errors::PoolError,
+    state::{Lp, User},
+};
 use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken,
@@ -7,6 +10,7 @@ use anchor_spl::{
 
 pub fn deposit_usdc(ctx: Context<DepositUsdc>, amount: u64) -> Result<()> {
     let signer = &ctx.accounts.signer;
+    let user = &mut ctx.accounts.user;
     let signer_ata = &mut ctx.accounts.signer_ata;
     let lp_ata = &mut ctx.accounts.lp_ata;
     let lp = &mut ctx.accounts.lp;
@@ -30,6 +34,7 @@ pub fn deposit_usdc(ctx: Context<DepositUsdc>, amount: u64) -> Result<()> {
         amount,
     )?;
     lp.usdc_amount += amount;
+    user.liquidity_usdc += amount;
     Ok(())
 }
 
@@ -48,10 +53,11 @@ pub struct DepositUsdc<'info> {
     pub signer_ata: Account<'info, TokenAccount>,
 
     #[account(
+      mut,
     seeds = [b"lp"],
     bump,
   )]
-    pub lp: Account<'info, Lp>,
+    pub lp: Box<Account<'info, Lp>>,
 
     #[account(
     mut,
@@ -59,6 +65,15 @@ pub struct DepositUsdc<'info> {
     associated_token::authority = lp,
   )]
     pub lp_ata: Account<'info, TokenAccount>,
+
+    #[account(
+        init_if_needed,
+        payer = signer,
+        space=User::LEN,
+        seeds = [b"user", signer.key().as_ref()],
+        bump,
+      )]
+    pub user: Box<Account<'info, User>>,
 
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,

@@ -126,6 +126,7 @@ pub struct ExpireOption<'info> {
     pub signer: Signer<'info>,
 
     #[account(
+        mut,
       seeds = [b"option", signer.key().as_ref(), &option_index.to_le_bytes()[..]],
       bump,
     )]
@@ -135,18 +136,21 @@ pub struct ExpireOption<'info> {
     pub usdc_mint: Account<'info, Mint>,
 
     #[account(
+        mut,
         seeds = [b"lp"],
         bump = lp_bump,
       )]
     pub lp: Box<Account<'info, Lp>>,
 
     #[account(
+        mut,
         associated_token::mint = wsol_mint,
         associated_token::authority = lp,
       )]
     pub lp_ata_wsol: Box<Account<'info, TokenAccount>>,
 
     #[account(
+        mut,
           associated_token::mint = usdc_mint,
           associated_token::authority = lp,
         )]
