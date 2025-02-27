@@ -11,6 +11,27 @@ Steps:
 
 ## Add Liquidity
 
+Steps:
+- Assert permissions
+- Validate inputs
+- Retrieve oracle token price
+- Compute add liquidity fee 
+- deposit_amt <- amount_in - fee
+- Check token ratio
+- Transfer token from user to custody account
+- Compute Pool AUM in USD
+- Compute how much LP token user should receive:
+    - token_amt_in_usd <- min(spot, ewma_price) * (amount_in - fee)
+    - lp_amount <- token_amt_in_usd / pool_aum_usd * lp_token_supply
+- Mint LP token to user's account
+- Update custody stats:
+    - Collected fees
+    - protocol fees
+    - deposit amount
+    - 
+- Update custody borrow rate
+- Update pool's AUM number
+    
 
 ## Make Option
 
@@ -52,8 +73,28 @@ Invariant rules:
 
 # Option premium computation
 
+Using Black-Scholes equation
 
 # Fee computation
+## Generic Fee
+
+Applies to:
+- AddLiquidity
+
+```
+if token_ratio is improved:
+    fee <- base_fee / ratio_fee
+otherwise
+    fee <- base_fee * ratio_fee
+
+where:
+    if new_ratio < target:
+        ratio_fee <- 1 + custody.fees.ratio_mult * (target - new_ratio) / (target - min)
+    else:
+        ratio_fee <- 1 + custody.fees.ratio_mult * (new_ratio - target) / (max - target)
+```
+
+## Buy Fee
 ```
 total_fee = custody_fee_pct * option_size (maybe use delta) * utilization_fee
 
@@ -73,3 +114,14 @@ if current_utilization < optimal_utilization:
 else:
     rate = base_rate + slope1 + (current_utilization - optimal_utilization) / (1 - optimal_utilization) * slope2
 ```
+# Check Token Ratio
+
+Ensure that updated token ratio is moved within  min, max specified
+
+if new_ratio < min:
+    assert that new_ratio >= current_ratio
+else if new_ratio > max:
+    assert that new_ratio <= current_ratio
+
+
+# Pool AUM computation
