@@ -31,9 +31,8 @@ Steps:
     - 
 - Update custody borrow rate
 - Update pool's AUM number
-    
 
-## Make Option
+## Purchase Option
 
 ### Inputs:
 - Token Custody (For eg, It would be BTC if Buy BTC call opt)
