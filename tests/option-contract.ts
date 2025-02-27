@@ -161,9 +161,14 @@ describe("option-contract", () => {
 
   it("Is initialized!", async () => {
     // Add your test here.
+    const [lp, lpBump] = PublicKey.findProgramAddressSync(
+      [Buffer.from("lp")],
+      program.programId
+    );
+    console.log(lp, lpBump)
     const tx = await program.methods
-      .initialize()
-      .accounts({ wsolMint: wsolMint, usdcMint: usdcMint })
+      .initialize(lpBump)
+      .accountsPartial({ wsolMint: wsolMint, usdcMint: usdcMint, lp:lp })
       .signers([localWallet])
       .rpc();
     console.log("Your transaction signature", tx);

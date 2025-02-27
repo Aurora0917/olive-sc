@@ -123,7 +123,6 @@ pub fn sell_option(
 }
 
 #[derive(Accounts)]
-#[instruction(option_index: u64)]
 pub struct SellOption<'info> {
     #[account(mut)]
     pub signer: Signer<'info>,
@@ -179,8 +178,6 @@ pub struct SellOption<'info> {
       init,
       payer = signer,
       space=OptionDetail::LEN,
-      seeds = [b"option", signer.key().as_ref(), &option_index.to_le_bytes()[..]],
-      bump,
     )]
     pub option_detail: Box<Account<'info, OptionDetail>>,
     /// CHECK:

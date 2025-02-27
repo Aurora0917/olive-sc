@@ -6,7 +6,7 @@ pub struct Lp {
     pub usdc_amount: u64,
     pub locked_sol_amount: u64,
     pub locked_usdc_amount: u64,
-    pub dump: u8,
+    pub bump: u8,
 }
 
 impl Lp {

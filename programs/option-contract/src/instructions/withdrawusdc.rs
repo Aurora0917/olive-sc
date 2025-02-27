@@ -9,7 +9,7 @@ use crate::{
     state::Lp,
 };
 
-pub fn withdraw_usdc(ctx: Context<WithdrawUsdc>, amount: u64, lp_bump: u8) -> Result<()> {
+pub fn withdraw_usdc(ctx: Context<WithdrawUsdc>, amount: u64) -> Result<()> {
     let signer_ata = &mut ctx.accounts.signer_ata;
     let lp_ata = &mut ctx.accounts.lp_ata;
     let lp = &mut ctx.accounts.lp;
@@ -26,7 +26,7 @@ pub fn withdraw_usdc(ctx: Context<WithdrawUsdc>, amount: u64, lp_bump: u8) -> Re
                 to: signer_ata.to_account_info(),
                 authority: lp.to_account_info(),
             },
-            &[&[b"lp", &[lp_bump]]],
+            &[&[b"lp", &[lp.bump]]],
         ),
         amount,
     )?;
@@ -34,7 +34,6 @@ pub fn withdraw_usdc(ctx: Context<WithdrawUsdc>, amount: u64, lp_bump: u8) -> Re
 }
 
 #[derive(Accounts)]
-#[instruction(lp_bump: u8)]
 pub struct WithdrawUsdc<'info> {
     #[account(mut)]
     pub signer: Signer<'info>,
@@ -51,7 +50,7 @@ pub struct WithdrawUsdc<'info> {
     #[account(
     mut,
     seeds = [b"lp"],
-    bump = lp_bump,
+    bump,
   )]
     pub lp: Account<'info, Lp>,
 

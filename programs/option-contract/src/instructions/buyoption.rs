@@ -10,7 +10,7 @@ use anchor_spl::{
     token::{self, Mint, Token, TokenAccount, Transfer as SplTransfer},
 };
 
-pub fn buy_option(ctx: Context<BuyOption>, option_index: u64, lp_bump: u8) -> Result<()> {
+pub fn buy_option(ctx: Context<BuyOption>, option_index: u64) -> Result<()> {
     let signer_ata_wsol = &mut ctx.accounts.signer_ata_wsol;
     let lp_ata_wsol = &mut ctx.accounts.lp_ata_wsol;
     let signer_ata_usdc = &mut ctx.accounts.signer_ata_usdc;
@@ -60,7 +60,7 @@ pub fn buy_option(ctx: Context<BuyOption>, option_index: u64, lp_bump: u8) -> Re
                         to: signer_ata_wsol.to_account_info(),
                         authority: lp.to_account_info(),
                     },
-                    &[&[b"lp", &[lp_bump]]],
+                    &[&[&b"lp"[..], &[lp.bump]]],
                 ),
                 amount,
             )?;
@@ -78,7 +78,7 @@ pub fn buy_option(ctx: Context<BuyOption>, option_index: u64, lp_bump: u8) -> Re
                         to: signer_ata_usdc.to_account_info(),
                         authority: lp.to_account_info(),
                     },
-                    &[&[b"lp", &[lp_bump]]],
+                    &[&[&b"lp"[..], &[lp.bump]]],
                 ),
                 amount,
             )?;
@@ -91,7 +91,7 @@ pub fn buy_option(ctx: Context<BuyOption>, option_index: u64, lp_bump: u8) -> Re
 }
 
 #[derive(Accounts)]
-#[instruction(option_index: u64, lp_bump: u8)]
+#[instruction(option_index: u64)]
 pub struct BuyOption<'info> {
     #[account(mut)]
     pub signer: Signer<'info>,
@@ -116,7 +116,7 @@ pub struct BuyOption<'info> {
     #[account(
       mut,
   seeds = [b"lp"],
-  bump = lp_bump,
+  bump = lp.bump,
 )]
     pub lp: Account<'info, Lp>,
 
@@ -141,11 +141,7 @@ pub struct BuyOption<'info> {
 )]
     pub user: Box<Account<'info, User>>,
 
-    #[account(
-        mut,
-    seeds = [b"option", signer.key().as_ref(), &option_index.to_le_bytes()[..]],
-    bump,
-  )]
+    #[account(mut)]
     pub option_detail: Box<Account<'info, OptionDetail>>,
 
     pub token_program: Program<'info, Token>,

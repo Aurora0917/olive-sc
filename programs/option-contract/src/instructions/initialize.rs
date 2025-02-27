@@ -5,14 +5,14 @@ use anchor_spl::{
   token::{Token, Mint, TokenAccount}
 };
 
-pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
+pub fn initialize(ctx: Context<Initialize>,  bump: u8) -> Result<()> {
   let lp = &mut ctx.accounts.lp;
 
   lp.sol_amount = 0;
   lp.usdc_amount = 0;
   lp.locked_sol_amount = 0;
   lp.locked_usdc_amount = 0;
-
+  lp.bump = bump;
   Ok(())
 }
 

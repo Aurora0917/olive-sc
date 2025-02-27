@@ -9,7 +9,7 @@ use anchor_spl::{
 };
 use pyth_sdk_solana::{state::SolanaPriceAccount, PriceFeed};
 
-pub fn exercise_option(ctx: Context<ExerciseOption>, option_index: u64, lp_bump: u8) -> Result<()> {
+pub fn exercise_option(ctx: Context<ExerciseOption>, option_index: u64) -> Result<()> {
     let signer_ata_wsol = &mut ctx.accounts.signer_ata_wsol;
     let signer_ata_usdc = &mut ctx.accounts.signer_ata_usdc;
     let lp_ata_usdc = &mut ctx.accounts.lp_ata_usdc;
@@ -68,7 +68,7 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, option_index: u64, lp_bump:
                     to: signer_ata_wsol.to_account_info(),
                     authority: lp.to_account_info(),
                 },
-                &[&[b"lp", &[lp_bump]]],
+                &[&[b"lp", &[lp.bump]]],
             ),
             amount as u64,
         )?;
@@ -105,7 +105,7 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, option_index: u64, lp_bump:
                     to: signer_ata_usdc.to_account_info(),
                     authority: lp.to_account_info(),
                 },
-                &[&[b"lp", &[lp_bump]]],
+                &[&[b"lp", &[lp.bump]]],
             ),
             amount as u64,
         )?;
@@ -119,7 +119,7 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, option_index: u64, lp_bump:
 }
 
 #[derive(Accounts)]
-#[instruction(option_index: u64, lp_bump: u8)]
+#[instruction(option_index: u64)]
 pub struct ExerciseOption<'info> {
     #[account(mut)]
     pub signer: Signer<'info>,
@@ -144,7 +144,7 @@ pub struct ExerciseOption<'info> {
     #[account(
         mut,
     seeds = [b"lp"],
-    bump = lp_bump,
+    bump,
   )]
     pub lp: Account<'info, Lp>,
 
@@ -169,11 +169,7 @@ pub struct ExerciseOption<'info> {
   )]
     pub user: Box<Account<'info, User>>,
 
-    #[account(
-        mut,
-      seeds = [b"option", signer.key().as_ref(), &option_index.to_le_bytes()[..]],
-      bump,
-    )]
+    #[account(mut)]
     pub option_detail: Box<Account<'info, OptionDetail>>,
     /// CHECK:
     pub pyth_price_account: AccountInfo<'info>,
