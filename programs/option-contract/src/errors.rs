@@ -8,6 +8,7 @@ pub enum OptionError {
     InvalidOptionIndexError,
     InvalidTimeError,
     InvalidPriceRequirementError,
+    StalePriceError,
 }
 
 #[error_code]

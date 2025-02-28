@@ -2,14 +2,14 @@ use std::ops::Div;
 
 use crate::{
     errors::OptionError,
-    state::{Lp, OptionDetail, User},
+    state::{Lp, OptionDetail, User}, utils::{USDC_DECIMALS, WSOL_DECIMALS},
 };
 use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken,
     token::{self, Mint, Token, TokenAccount, Transfer as SplTransfer},
 };
-use pyth_sdk_solana::{state::SolanaPriceAccount, PriceFeed};
+use pyth_sdk_solana::state::SolanaPriceAccount;
 
 pub fn sell_option(
     ctx: Context<SellOption>,
@@ -36,15 +36,13 @@ pub fn sell_option(
         user.option_index + 1,
         OptionError::InvalidOptionIndexError
     );
-    let current_timestamp = Clock::get().unwrap().unix_timestamp;
     let price_account_info = &ctx.accounts.pyth_price_account;
-    let price_feed: PriceFeed =
-        SolanaPriceAccount::account_info_to_feed(price_account_info).unwrap();
-    let price = price_feed
-        .get_price_no_older_than(current_timestamp, 60)
-        .unwrap(); // Ensure price is not older than 60 seconds
+    let price_feed = SolanaPriceAccount::account_info_to_feed(price_account_info)
+        .map_err(|_| ProgramError::InvalidAccountData)?;
+    let price = price_feed.get_price_unchecked();
+    msg!("price_feed: {:?}", price);
     let oracle_price = (price.price as f64) * 10f64.powi(price.expo);
-
+    msg!("oracle_price: {}", oracle_price);
     //calc premium
     let period_sqrt = (period as f64).sqrt(); // Using floating-point sqrt
     let iv = 0.6;
@@ -57,7 +55,10 @@ pub fn sell_option(
             // put - cash secured usdc option
             strike / oracle_price
         };
-    let premium_sol = premium.div(oracle_price) as u64;
+    let premium_sol = (premium.div(oracle_price) * i32::pow(10, WSOL_DECIMALS) as f64) as u64;
+    let premium_usdc = (premium * i32::pow(10, USDC_DECIMALS) as f64) as u64;
+    msg!("premium_sol: {}", premium_sol);
+
     if pay_sol {
         require_gte!(
             signer_ata_wsol.amount,
@@ -78,10 +79,13 @@ pub fn sell_option(
     } else {
         require_gte!(
             signer_ata_usdc.amount,
-            premium as u64,
+            premium_usdc,
             OptionError::InvalidSignerBalanceError
         );
         // send premium to pool
+        msg!("signer_ata_usdc: {}", signer_ata_usdc.key());
+        msg!("lp_ata_usdc: {}", lp_ata_usdc.key());
+
         token::transfer(
             CpiContext::new(
                 token_program.to_account_info(),
@@ -91,7 +95,7 @@ pub fn sell_option(
                     authority: signer.to_account_info(),
                 },
             ),
-            premium as u64,
+            premium_usdc,
         )?;
     }
     // Lock assets for call(covered sol)/ put(secured-cash usdc) option
@@ -147,7 +151,7 @@ pub struct SellOption<'info> {
     #[account(
         mut,
     seeds = [b"lp"],
-    bump,
+    bump=lp.bump,
   )]
     pub lp: Box<Account<'info, Lp>>,
 
@@ -160,7 +164,7 @@ pub struct SellOption<'info> {
 
     #[account(
         mut,
-      associated_token::mint = wsol_mint,
+      associated_token::mint = usdc_mint,
       associated_token::authority = lp,
     )]
     pub lp_ata_usdc: Box<Account<'info, TokenAccount>>,

@@ -6,8 +6,9 @@ use instructions::*;
 pub mod errors;
 pub mod instructions;
 pub mod state;
+pub mod utils;
 
-declare_id!("9BCUH8rU7V3nD1syHWdEULadX5V2QZzoUi8gHHRYQJCP");
+declare_id!("HxerQBnh4k3Dt5DT9B7U666VFh9BW1DKxm59zE9ukEKP");
 
 #[program]
 pub mod option_contract {
