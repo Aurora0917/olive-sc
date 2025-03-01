@@ -1,6 +1,6 @@
 use crate::{
     errors::OptionError,
-    state::{Lp, OptionDetail, User},
+    state::{Lp, OptionDetail, User}, utils::SOL_USD_PYTH_ACCOUNT,
 };
 use anchor_lang::prelude::*;
 use anchor_spl::{
@@ -35,9 +35,9 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, option_index: u64) -> Resul
     let current_timestamp = Clock::get().unwrap().unix_timestamp;
     let price_feed: PriceFeed =
         SolanaPriceAccount::account_info_to_feed(price_account_info).unwrap();
-    let price = price_feed
-        .get_price_no_older_than(current_timestamp, 60)
-        .unwrap(); // Ensure price is not older than 60 seconds
+    // TODO: Update function on Mainnnet
+    let price = price_feed.get_price_unchecked();
+        // .get_price_no_older_than(current_timestamp, 60).unwrap();
     let oracle_price = (price.price as f64) * 10f64.powi(price.expo);
 
     let amount: f64;
@@ -169,9 +169,12 @@ pub struct ExerciseOption<'info> {
   )]
     pub user: Box<Account<'info, User>>,
 
-    #[account(mut)]
+    #[account(mut,
+        seeds = [b"option", signer.key().as_ref(), option_index.to_le_bytes().as_ref()],
+        bump)]
     pub option_detail: Box<Account<'info, OptionDetail>>,
-    /// CHECK:
+        /// CHECK:
+    #[account(address = SOL_USD_PYTH_ACCOUNT)]
     pub pyth_price_account: AccountInfo<'info>,
 
     pub token_program: Program<'info, Token>,

@@ -35,9 +35,11 @@ describe("option-contract", () => {
   let wsolMint, ownerWSOLATA, userWSOLATA;
   let userWallet = Keypair.fromSecretKey(new Uint8Array(secret));
 
-  usdcMint = new PublicKey("4dfkxzRKJzwhWHAkJErU4YVKr8RVKESDFj5xKqGuw7Xs")
-  wsolMint = new PublicKey("AvGyRAUiWkF6fzALe1LNnzCwGbNTZ4aqyfthuEZHM5Wq")
-
+  usdcMint = new PublicKey("4dfkxzRKJzwhWHAkJErU4YVKr8RVKESDFj5xKqGuw7Xs");
+  wsolMint = new PublicKey("AvGyRAUiWkF6fzALe1LNnzCwGbNTZ4aqyfthuEZHM5Wq");
+  const SOL_PYTH_FEED = new PublicKey(
+    "J83w4HKfqxwcq3BEMMkPFSppX3gqekLyLJBexebFVkix"
+  );
   // before(async () => {
   //   //
   //   await airdropSol(
@@ -159,18 +161,63 @@ describe("option-contract", () => {
   //   // );
   // });
 
-  it("Is initialized!", async () => {
+  // it("Is initialized!", async () => {
+  //   // Add your test here.
+  //   const [lp, lpBump] = PublicKey.findProgramAddressSync(
+  //     [Buffer.from("lp")],
+  //     program.programId
+  //   );
+  //   console.log(lp, lpBump)
+  //   const tx = await program.methods
+  //     .initialize(lpBump)
+  //     .accountsPartial({ wsolMint: wsolMint, usdcMint: usdcMint, lp:lp })
+  //     .signers([localWallet])
+  //     .rpc();
+  //   console.log("Your transaction signature", tx);
+  // });
+  it("sell option!", async () => {
     // Add your test here.
-    const [lp, lpBump] = PublicKey.findProgramAddressSync(
-      [Buffer.from("lp")],
+    console.log(userWallet.publicKey.toBase58());
+    // const [userinfo] = PublicKey.findProgramAddressSync(
+    //   [
+    //     Buffer.from("user"),
+    //     userWallet.publicKey.toBuffer(),
+    //   ],
+    //   program.programId
+    // );
+
+    // const userInfo =
+    // await program.account.user.fetch(userinfo);
+    // console.log(userInfo.optionIndex.toNumber())
+    const [detailAccount] = PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("option"),
+        userWallet.publicKey.toBuffer(),
+        new anchor.BN(3).toArrayLike(Buffer, "le", 8),
+      ],
       program.programId
     );
-    console.log(lp, lpBump)
-    const tx = await program.methods
-      .initialize(lpBump)
-      .accountsPartial({ wsolMint: wsolMint, usdcMint: usdcMint, lp:lp })
-      .signers([localWallet])
-      .rpc();
-    console.log("Your transaction signature", tx);
+    console.log("detail account:", detailAccount.toBase58());
+
+    // const tx = await program.methods
+    //   .sellOption(
+    //     new anchor.BN(2),
+    //     new anchor.BN(1),
+    //     150.3,
+    //     new anchor.BN(14),
+    //     new anchor.BN(1745727408),
+    //     true,
+    //     false
+    //   )
+    //   .accounts({
+    //     signer: userWallet.publicKey,
+    //     wsolMint: wsolMint,
+    //     usdcMint: usdcMint,
+    //     pythPriceAccount: SOL_PYTH_FEED,
+    //   })
+    //   .signers([userWallet])
+    //   .rpc();
+
+    // console.log("Your transaction signature", tx);
   });
 });

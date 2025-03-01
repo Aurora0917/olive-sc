@@ -119,7 +119,9 @@ pub struct ExpireOption<'info> {
     #[account(mut)]
     pub signer: Signer<'info>,
 
-    #[account(mut)]
+    #[account(mut,
+        seeds = [b"option", signer.key().as_ref(), option_index.to_le_bytes().as_ref()],
+        bump)]
     pub option_detail: Box<Account<'info, OptionDetail>>,
 
     pub wsol_mint: Account<'info, Mint>,

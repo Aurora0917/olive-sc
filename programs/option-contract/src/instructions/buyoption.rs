@@ -100,17 +100,17 @@ pub struct BuyOption<'info> {
     pub usdc_mint: Account<'info, Mint>,
 
     #[account(
-  mut,
-  associated_token::mint = wsol_mint,
-  associated_token::authority = signer,
-)]
+    mut,
+    associated_token::mint = wsol_mint,
+    associated_token::authority = signer,
+    )]
     pub signer_ata_wsol: Account<'info, TokenAccount>,
 
     #[account(
     mut,
     associated_token::mint = usdc_mint,
     associated_token::authority = signer,
-  )]
+    )]
     pub signer_ata_usdc: Account<'info, TokenAccount>,
 
     #[account(
@@ -141,7 +141,9 @@ pub struct BuyOption<'info> {
 )]
     pub user: Box<Account<'info, User>>,
 
-    #[account(mut)]
+    #[account(mut,
+        seeds = [b"option", signer.key().as_ref(), option_index.to_le_bytes().as_ref()],
+        bump)]
     pub option_detail: Box<Account<'info, OptionDetail>>,
 
     pub token_program: Program<'info, Token>,

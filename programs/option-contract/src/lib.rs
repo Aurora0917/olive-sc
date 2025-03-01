@@ -8,7 +8,7 @@ pub mod instructions;
 pub mod state;
 pub mod utils;
 
-declare_id!("HxerQBnh4k3Dt5DT9B7U666VFh9BW1DKxm59zE9ukEKP");
+declare_id!("6h756PU3oXMfQhUXkvcUjspGf9BpYqRUvYPhgQgc3owQ");
 
 #[program]
 pub mod option_contract {
@@ -36,21 +36,21 @@ pub mod option_contract {
 
     pub fn sell_option(
         ctx: Context<SellOption>,
+        option_index: u64,
         amount: u64,
         strike: f64,
         period: u64,
         expired_time: u64,
-        option_index: u64,
         is_call: bool,
         pay_sol: bool,
     ) -> Result<()> {
         instructions::selloption::sell_option(
             ctx,
+            option_index,
             amount,
             strike,
             period,
             expired_time,
-            option_index,
             is_call,
             pay_sol,
         )
