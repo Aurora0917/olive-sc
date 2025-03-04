@@ -46,12 +46,13 @@ pub fn buy_option(ctx: Context<BuyOption>, option_index: u64) -> Result<()> {
             lp.locked_usdc_amount -= option_detail.usdc_amount;
             lp.usdc_amount += option_detail.usdc_amount;
         }
-        if option_detail.premium_unit == true {
+        if option_detail.option_type {
             require_gte!(
                 lp_ata_wsol.amount,
                 amount,
                 OptionError::InvalidPoolBalanceError
             );
+            lp.sol_amount -= amount;
             token::transfer(
                 CpiContext::new_with_signer(
                     token_program.to_account_info(),
@@ -70,6 +71,7 @@ pub fn buy_option(ctx: Context<BuyOption>, option_index: u64) -> Result<()> {
                 amount,
                 OptionError::InvalidPoolBalanceError
             );
+            lp.usdc_amount -= amount;
             token::transfer(
                 CpiContext::new_with_signer(
                     token_program.to_account_info(),

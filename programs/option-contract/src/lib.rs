@@ -36,7 +36,6 @@ pub mod option_contract {
 
     pub fn sell_option(
         ctx: Context<SellOption>,
-        option_index: u64,
         amount: u64,
         strike: f64,
         period: u64,
@@ -46,7 +45,6 @@ pub mod option_contract {
     ) -> Result<()> {
         instructions::selloption::sell_option(
             ctx,
-            option_index,
             amount,
             strike,
             period,

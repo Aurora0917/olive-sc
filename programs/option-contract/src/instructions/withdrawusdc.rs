@@ -6,18 +6,20 @@ use anchor_spl::{
 
 use crate::{
     errors::PoolError,
-    state::Lp,
+    state::{Lp, User},
 };
 
 pub fn withdraw_usdc(ctx: Context<WithdrawUsdc>, amount: u64) -> Result<()> {
     let signer_ata = &mut ctx.accounts.signer_ata;
     let lp_ata = &mut ctx.accounts.lp_ata;
     let lp = &mut ctx.accounts.lp;
+    let user = &mut ctx.accounts.user;
     let token_program = &ctx.accounts.token_program;
 
     require_gte!(lp_ata.amount, amount, PoolError::InvalidPoolBalanceError);
-
+    require_gte!(user.liquidity_usdc, amount, PoolError::InvalidWithdrawError);
     lp.usdc_amount -= amount;
+    user.liquidity_usdc -= amount;
     token::transfer(
         CpiContext::new_with_signer(
             token_program.to_account_info(),
@@ -60,6 +62,13 @@ pub struct WithdrawUsdc<'info> {
     associated_token::authority = lp,
   )]
     pub lp_ata: Account<'info, TokenAccount>,
+
+    #[account(
+      mut,
+      seeds = [b"user", signer.key().as_ref()],
+      bump,
+    )]
+    pub user: Box<Account<'info, User>>,
 
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,

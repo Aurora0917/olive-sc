@@ -14,7 +14,6 @@ use pyth_sdk_solana::state::SolanaPriceAccount;
 
 pub fn sell_option(
     ctx: Context<SellOption>,
-    option_index: u64,
     amount: u64,
     strike: f64,
     period: u64,       // number day
@@ -31,12 +30,8 @@ pub fn sell_option(
     let token_program = &ctx.accounts.token_program;
     let option_detail = &mut ctx.accounts.option_detail;
     let user = &mut ctx.accounts.user;
-
-    require_eq!(
-        option_index,
-        user.option_index + 1,
-        OptionError::InvalidOptionIndexError
-    );
+    let option_index = user.option_index + 1;
+    
     let price_account_info = &ctx.accounts.pyth_price_account;
     let price_feed = SolanaPriceAccount::account_info_to_feed(price_account_info)
         .map_err(|_| ProgramError::InvalidAccountData)?;
@@ -97,19 +92,18 @@ pub fn sell_option(
     // Lock assets for call(covered sol)/ put(secured-cash usdc) option
     if is_call {
         require_gte!(lp.sol_amount, amount, OptionError::InvalidPoolBalanceError);
-        lp.sol_amount += premium as u64;
         lp.locked_sol_amount += premium as u64;
         lp.sol_amount -= premium as u64;
+        option_detail.sol_amount = amount;
     } else {
         require_gte!(lp.usdc_amount, amount, OptionError::InvalidPoolBalanceError);
-        lp.usdc_amount += premium as u64;
         lp.locked_usdc_amount += premium as u64;
         lp.usdc_amount -= premium as u64;
+        option_detail.usdc_amount = amount;
     }
 
     // store option data
     option_detail.index = option_index;
-    option_detail.sol_amount = amount;
     option_detail.period = period;
     option_detail.expired_date = expired_time as u64;
     option_detail.strike_price = strike;
