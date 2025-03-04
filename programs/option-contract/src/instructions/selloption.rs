@@ -3,7 +3,7 @@ use std::ops::Div;
 use crate::{
     errors::OptionError,
     state::{Lp, OptionDetail, User},
-    utils::{SOL_USD_PYTH_ACCOUNT, USDC_DECIMALS, WSOL_DECIMALS},
+    utils::{black_scholes, SOL_USD_PYTH_ACCOUNT, USDC_DECIMALS, WSOL_DECIMALS},
 };
 use anchor_lang::prelude::*;
 use anchor_spl::{
@@ -31,7 +31,7 @@ pub fn sell_option(
     let option_detail = &mut ctx.accounts.option_detail;
     let user = &mut ctx.accounts.user;
     let option_index = user.option_index + 1;
-    
+
     let price_account_info = &ctx.accounts.pyth_price_account;
     let price_feed = SolanaPriceAccount::account_info_to_feed(price_account_info)
         .map_err(|_| ProgramError::InvalidAccountData)?;
@@ -39,17 +39,18 @@ pub fn sell_option(
     let price = price_feed.get_price_unchecked();
     // .get_price_no_older_than(current_timestamp, 60).unwrap();
     let oracle_price = (price.price as f64) * 10f64.powi(price.expo);
-    let period_sqrt = (period as f64).sqrt(); // Using floating-point sqrt
-    let iv = 0.6;
-    let premium = period_sqrt
-        * iv
-        * if is_call {
-            // call - covered sol option
-            oracle_price / strike
-        } else {
-            // put - cash secured usdc option
-            strike / oracle_price
-        };
+    let period_year = (period as f64).div(365.0); // Using floating-point sqrt
+    // let iv = 0.6;
+    // let premium = period_sqrt
+    //     * iv
+    //     * if is_call {
+    //         // call - covered sol option
+    //         oracle_price / strike
+    //     } else {
+    //         // put - cash secured usdc option
+    //         strike / oracle_price
+    //     };
+    let premium = black_scholes(oracle_price, strike, period_year, is_call);
     let premium_sol = (premium.div(oracle_price) * i32::pow(10, WSOL_DECIMALS) as f64) as u64;
     let premium_usdc = (premium * i32::pow(10, USDC_DECIMALS) as f64) as u64;
 
