@@ -1,6 +1,6 @@
-## Add Custody
+# Add Custody
 
-Steps:
+## Steps:
 - Verify if signer is one of multisigs
 - Terminate early if not all multisigs signers are signed yet
 - Check that there is no other custody for this token
@@ -8,12 +8,11 @@ Steps:
 - Update pool account
 - Update custody account
 
-
-## Add Liquidity
+# Add Liquidity
 
 Add liquidity to pool
 
-Steps:
+## Steps:
 - Assert permissions
 - Validate inputs
 - Retrieve oracle token price
@@ -33,11 +32,12 @@ Steps:
 - Update custody borrow rate
 - Update pool's AUM number
 
-## Exercise Option
+# Exercise Option
 
 ## Steps:
 - Assert that option position is not alrdy exercised
 - Retrieve oracle token price of custody
+- Assert that curr_time <= option.expire_time
 - if call option:
     - if token_price >= strike_price:
         - profit <- (token_price_in_usd - token_strike_price_in_usd) * num_of_contracts
@@ -53,16 +53,15 @@ Steps:
     - Collected fee
     - assets_owned
 
+# Purchase Option
 
-## Purchase Option
-
-### Inputs:
+## Inputs:
 - Token Custody (For eg, It would be BTC if Buy BTC call opt)
 - Oracle account of custody token (BTC)
 - Option pda should be made in:
     - "option" + user.pubkey + pool.pubkey + custody.pubkey + "buy" | "sell"
 
-### Steps:
+## Steps:
 - Assert permission:
     - Ensure that custody provided is not stable
 - Retrieve oracle token price of custody (See #Price retrieval Strategy) and select min price
