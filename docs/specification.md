@@ -11,6 +11,8 @@ Steps:
 
 ## Add Liquidity
 
+Add liquidity to pool
+
 Steps:
 - Assert permissions
 - Validate inputs
@@ -27,10 +29,30 @@ Steps:
 - Update custody stats:
     - Collected fees
     - protocol fees
-    - deposit amount
-    - 
+    - increase owned amount
 - Update custody borrow rate
 - Update pool's AUM number
+
+## Exercise Option
+
+## Steps:
+- Assert that option position is not alrdy exercised
+- Retrieve oracle token price of custody
+- if call option:
+    - if token_price >= strike_price:
+        - profit <- (token_price_in_usd - token_strike_price_in_usd) * num_of_contracts
+- if call option:
+    - if token_price <= strike_price:
+        - profit <- (strike_price - token_price_in_usd) * num_of_contracts
+- reward_amt <- reward_fee * profit
+- user_amt <- profit - reward_amt - fee
+- Update custody locked amount by reducing transfer amt (Unlocking)
+- Transfer user_amt from custody wallet to user receiving wallet
+- Transfer reward amt from custody wallet to signer
+- Update custody stats:
+    - Collected fee
+    - assets_owned
+
 
 ## Purchase Option
 
@@ -46,14 +68,14 @@ Steps:
 - Retrieve oracle token price of custody (See #Price retrieval Strategy) and select min price
 - Compute premium of option given token price and buyer's option input
 - Calculate fee of trade (See Fee computation)
-- Total transfer amount = Option Premium + fee (in USD)
+- Total transfer amount (WBTC) = Option Premium + fee (in USD)
 - Create Option account
 - Transfer WBTC from user to custody account as locked liquidity
     - Check that it satisfies utilization
+- Update locked amount of WBTC in custody by transfer amount
 - Update Custody stats changed from this trade (for record keeping only)
     - Collected fees
     - volume stats
-    - collateral
     - protocol fees 
 - Update hourly borrow rate of custody asset (See update borrow rate)
 
@@ -124,3 +146,7 @@ else if new_ratio > max:
 
 
 # Pool AUM computation
+
+```
+AUM <- sum(token_owned + token_price) + interest_earned
+```
