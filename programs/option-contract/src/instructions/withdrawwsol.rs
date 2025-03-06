@@ -16,11 +16,19 @@ pub fn withdraw_wsol(ctx: Context<WithdrawWsol>, amount: u64) -> Result<()> {
     let user = &mut ctx.accounts.user;
     let token_program = &ctx.accounts.token_program;
 
+    // Check if liquidity pool has enough balance
     require_gte!(lp_ata.amount, amount, PoolError::InvalidPoolBalanceError);
+
+    // Check if deposited amount by user is enough to withdraw
     require_gte!(user.liquidity_wsol, amount, PoolError::InvalidWithdrawError);
 
+    // Reduce WSOL amount from liquidity pool
     lp.sol_amount -= amount;
+
+    // Reduce WSOL amount from deposited amount by user
     user.liquidity_wsol -= amount;
+
+    // Transfer USDC from liquidity pool to user
     token::transfer(
         CpiContext::new_with_signer(
             token_program.to_account_info(),

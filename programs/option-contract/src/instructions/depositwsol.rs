@@ -16,12 +16,14 @@ pub fn deposit_wsol(ctx: Context<DepositWsol>, amount: u64) -> Result<()> {
     let lp = &mut ctx.accounts.lp;
     let token_program = &ctx.accounts.token_program;
 
+    // Check if user balance is enough to deposit amount to liquidity pool
     require_gte!(
         signer_ata.amount,
         amount,
         PoolError::InvalidSignerBalanceError
     );
 
+    // Transfer WSOL from users to liquidity pool
     token::transfer(
         CpiContext::new(
             token_program.to_account_info(),
@@ -33,7 +35,11 @@ pub fn deposit_wsol(ctx: Context<DepositWsol>, amount: u64) -> Result<()> {
         ),
         amount,
     )?;
+
+    // Add liquidty pool amount
     lp.sol_amount += amount;
+
+    // Add deposited amount by user
     user.liquidity_wsol += amount;
     Ok(())
 }

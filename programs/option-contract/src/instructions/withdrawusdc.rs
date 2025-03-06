@@ -16,10 +16,18 @@ pub fn withdraw_usdc(ctx: Context<WithdrawUsdc>, amount: u64) -> Result<()> {
     let user = &mut ctx.accounts.user;
     let token_program = &ctx.accounts.token_program;
 
+    // Check if liquidity pool has enough balance
     require_gte!(lp_ata.amount, amount, PoolError::InvalidPoolBalanceError);
+    // Check if deposited amount by user is enough to withdraw
     require_gte!(user.liquidity_usdc, amount, PoolError::InvalidWithdrawError);
+
+    // Reduce usdc amount from liquidity pool
     lp.usdc_amount -= amount;
+
+    // Reduce usdc amount from deposited amount by user
     user.liquidity_usdc -= amount;
+
+    // Transfer USDC from liquidity pool to user
     token::transfer(
         CpiContext::new_with_signer(
             token_program.to_account_info(),

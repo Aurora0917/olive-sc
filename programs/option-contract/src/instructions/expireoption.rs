@@ -1,6 +1,7 @@
 use crate::{
     errors::OptionError,
     state::{Lp, OptionDetail},
+    utils::{USDC_DECIMALS, WSOL_DECIMALS},
 };
 use anchor_lang::prelude::*;
 use anchor_spl::{
@@ -17,6 +18,7 @@ pub fn expire_option(ctx: Context<ExpireOption>, option_index: u64, price: f64) 
     let lp_ata_usdc = &mut ctx.accounts.lp_ata_usdc;
     let lp_ata_wsol = &mut ctx.accounts.lp_ata_wsol;
 
+    // Check if this option is expired
     require_gt!(
         current_timestamp as u64,
         option_detail.expired_date,
@@ -27,7 +29,6 @@ pub fn expire_option(ctx: Context<ExpireOption>, option_index: u64, price: f64) 
         option_detail.index,
         OptionError::InvalidOptionIndexError
     );
-    let amount: f64;
     if price > option_detail.strike_price && option_detail.option_type {
         require_gte!(
             lp.locked_sol_amount,
@@ -37,9 +38,10 @@ pub fn expire_option(ctx: Context<ExpireOption>, option_index: u64, price: f64) 
         lp.locked_sol_amount -= option_detail.sol_amount;
         lp.sol_amount += option_detail.sol_amount;
 
-        // call / covered sol
-        amount = ((price - option_detail.strike_price) / option_detail.strike_price)
-            * (option_detail.sol_amount as f64);
+        // Calculate profit : call / covered sol
+        let amount = ((price - option_detail.strike_price) / option_detail.strike_price)
+            * (option_detail.sol_amount as f64)
+            * i32::pow(10, WSOL_DECIMALS) as f64;
 
         // send profit to user
         token::transfer(
@@ -68,8 +70,10 @@ pub fn expire_option(ctx: Context<ExpireOption>, option_index: u64, price: f64) 
         lp.locked_usdc_amount -= option_detail.usdc_amount;
         lp.usdc_amount += option_detail.usdc_amount;
 
-        // put / case-secured usdc
-        amount = (option_detail.strike_price - price) / price * (option_detail.usdc_amount as f64);
+        // Calculate profit : put / case-secured usdc
+        let amount = (option_detail.strike_price - price) / price
+            * (option_detail.usdc_amount as f64)
+            * i32::pow(10, USDC_DECIMALS) as f64;
 
         // send profit to user
         token::transfer(

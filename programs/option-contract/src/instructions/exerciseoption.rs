@@ -1,6 +1,6 @@
 use crate::{
     errors::OptionError,
-    state::{Lp, OptionDetail, User}, utils::SOL_USD_PYTH_ACCOUNT,
+    state::{Lp, OptionDetail, User}, utils::{SOL_USD_PYTH_ACCOUNT, USDC_DECIMALS, WSOL_DECIMALS},
 };
 use anchor_lang::prelude::*;
 use anchor_spl::{
@@ -19,20 +19,24 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, option_index: u64) -> Resul
     let option_detail = &mut ctx.accounts.option_detail;
     let price_account_info = &ctx.accounts.pyth_price_account;
 
+    // Current Unix timestamp
     let current_timestamp = Clock::get().unwrap().unix_timestamp;
 
+    // Check if the option that user want to exercise to liquidity pool is exist
     require_eq!(
         option_index,
         option_detail.index,
         OptionError::InvalidOptionIndexError
     );
+
+    // Check if option is available to exercise, before expired time.
     require_gt!(
         option_detail.expired_date,
         current_timestamp as u64,
         OptionError::InvalidTimeError
     );
 
-    let current_timestamp = Clock::get().unwrap().unix_timestamp;
+    // Get Price feed from Pyth network
     let price_feed: PriceFeed =
         SolanaPriceAccount::account_info_to_feed(price_account_info).unwrap();
     // TODO: Update function on Mainnnet
@@ -40,7 +44,6 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, option_index: u64) -> Resul
         // .get_price_no_older_than(current_timestamp, 60).unwrap();
     let oracle_price = (price.price as f64) * 10f64.powi(price.expo);
 
-    let amount: f64;
     if option_detail.option_type {
         require_gte!(
             oracle_price,
@@ -55,9 +58,9 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, option_index: u64) -> Resul
         lp.locked_sol_amount -= option_detail.sol_amount;
         lp.sol_amount += option_detail.sol_amount;
 
-        // call / covered sol
-        amount = ((oracle_price - option_detail.strike_price) / option_detail.strike_price)
-            * (option_detail.sol_amount as f64);
+        // Calculate Sol Amount from Option Detail Value : call / covered sol
+        let amount = ((oracle_price - option_detail.strike_price) / option_detail.strike_price)
+            * (option_detail.sol_amount as f64) * i32::pow(10, WSOL_DECIMALS) as f64;
 
         // send profit to user
         token::transfer(
@@ -92,9 +95,9 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, option_index: u64) -> Resul
         lp.locked_usdc_amount -= option_detail.usdc_amount;
         lp.usdc_amount += option_detail.usdc_amount;
 
-        // put / case-secured usdc
-        amount = (option_detail.strike_price - oracle_price) / oracle_price
-            * (option_detail.usdc_amount as f64);
+        // Calculate Profit amount with option detail values:  put / case-secured usdc
+        let amount = (option_detail.strike_price - oracle_price) / oracle_price
+            * (option_detail.usdc_amount as f64) * i32::pow(10, USDC_DECIMALS) as f64;
 
         // send profit to user
         token::transfer(

@@ -16,12 +16,14 @@ pub fn deposit_usdc(ctx: Context<DepositUsdc>, amount: u64) -> Result<()> {
     let lp = &mut ctx.accounts.lp;
     let token_program = &ctx.accounts.token_program;
 
+    // Check if the user balance is enough to deposit assets to liquidity pool
     require_gte!(
         signer_ata.amount,
         amount,
         PoolError::InvalidSignerBalanceError
     );
 
+    // Transfer USDC to liquidity Pool from user
     token::transfer(
         CpiContext::new(
             token_program.to_account_info(),
@@ -33,7 +35,11 @@ pub fn deposit_usdc(ctx: Context<DepositUsdc>, amount: u64) -> Result<()> {
         ),
         amount,
     )?;
+
+    // Add amount to liquidity pool
     lp.usdc_amount += amount;
+
+    // Add deposited amount buy user
     user.liquidity_usdc += amount;
     Ok(())
 }

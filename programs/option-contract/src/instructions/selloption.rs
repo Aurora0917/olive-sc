@@ -14,10 +14,10 @@ use pyth_sdk_solana::state::SolanaPriceAccount;
 
 pub fn sell_option(
     ctx: Context<SellOption>,
-    amount: u64,
-    strike: f64,
-    period: u64,       // number day
-    expired_time: u64, // when the option is expired
+    amount: u64,    // WSOL/USDC account for options, call option - SOL amount, Put option - USDC amount
+    strike: f64,    // Strike price
+    period: u64,       // Number of days from option creation to expiration
+    expired_time: u64, // when the option is expired : Unix epoch time
     is_call: bool,     // true : call option, false : put option
     pay_sol: bool,     // true : sol, false : usdc
 ) -> Result<()> {
@@ -33,33 +33,35 @@ pub fn sell_option(
     let option_index = user.option_index + 1;
 
     let price_account_info = &ctx.accounts.pyth_price_account;
+    // Get Price Feed from Pyth network price account.
     let price_feed = SolanaPriceAccount::account_info_to_feed(price_account_info)
         .map_err(|_| ProgramError::InvalidAccountData)?;
+
     // TODO: Update function on Mainnnet
     let price = price_feed.get_price_unchecked();
     // .get_price_no_older_than(current_timestamp, 60).unwrap();
+
     let oracle_price = (price.price as f64) * 10f64.powi(price.expo);
-    let period_year = (period as f64).div(365.0); // Using floating-point sqrt
-    // let iv = 0.6;
-    // let premium = period_sqrt
-    //     * iv
-    //     * if is_call {
-    //         // call - covered sol option
-    //         oracle_price / strike
-    //     } else {
-    //         // put - cash secured usdc option
-    //         strike / oracle_price
-    //     };
+    let period_year = (period as f64).div(365.0);
+    
+    // Calculate Premium in usd using black scholes formula.
     let premium = black_scholes(oracle_price, strike, period_year, is_call);
+    
+    // Calculate Premium in WSOL 
     let premium_sol = (premium.div(oracle_price) * i32::pow(10, WSOL_DECIMALS) as f64) as u64;
+    // Calculate Premium in USDC
     let premium_usdc = (premium * i32::pow(10, USDC_DECIMALS) as f64) as u64;
 
     if pay_sol {
+
+        // Check if the user's WSOL balance is enough to pay premium
         require_gte!(
             signer_ata_wsol.amount,
             premium_sol,
             OptionError::InvalidSignerBalanceError
         );
+
+        // Send WSOL from User to Liquidity Pool as premium
         token::transfer(
             CpiContext::new(
                 token_program.to_account_info(),
@@ -71,13 +73,20 @@ pub fn sell_option(
             ),
             premium_sol,
         )?;
+
+        // Add premium to liquidity pool 
+        lp.sol_amount += premium_sol as u64;
+        option_detail.premium = premium_sol;
+
     } else {
+
+        // Check if the user has enough USDC balance to pay premium
         require_gte!(
             signer_ata_usdc.amount,
             premium_usdc,
             OptionError::InvalidSignerBalanceError
         );
-        // send premium to pool
+        // Send USDC from User to Liquidity Pool as premium
         token::transfer(
             CpiContext::new(
                 token_program.to_account_info(),
@@ -89,17 +98,22 @@ pub fn sell_option(
             ),
             premium_usdc,
         )?;
+        
+        // Add premium to liquidity pool 
+        lp.usdc_amount += premium_usdc as u64;
+        option_detail.premium = premium_usdc;
     }
+
     // Lock assets for call(covered sol)/ put(secured-cash usdc) option
     if is_call {
         require_gte!(lp.sol_amount, amount, OptionError::InvalidPoolBalanceError);
-        lp.locked_sol_amount += premium as u64;
-        lp.sol_amount -= premium as u64;
+        lp.locked_sol_amount += amount as u64;
+        lp.sol_amount -= amount as u64;
         option_detail.sol_amount = amount;
     } else {
         require_gte!(lp.usdc_amount, amount, OptionError::InvalidPoolBalanceError);
-        lp.locked_usdc_amount += premium as u64;
-        lp.usdc_amount -= premium as u64;
+        lp.locked_usdc_amount += amount as u64;
+        lp.usdc_amount -= amount as u64;
         option_detail.usdc_amount = amount;
     }
 
@@ -108,7 +122,6 @@ pub fn sell_option(
     option_detail.period = period;
     option_detail.expired_date = expired_time as u64;
     option_detail.strike_price = strike;
-    option_detail.premium = premium as u64;
     option_detail.premium_unit = pay_sol;
     option_detail.option_type = is_call;
     option_detail.valid = true;
@@ -118,7 +131,6 @@ pub fn sell_option(
 }
 
 #[derive(Accounts)]
-#[instruction(option_index: u64)]
 pub struct SellOption<'info> {
     #[account(mut)]
     pub signer: Signer<'info>,
@@ -174,7 +186,7 @@ pub struct SellOption<'info> {
       init,
       payer = signer,
       space=OptionDetail::LEN,
-      seeds = [b"option", signer.key().as_ref(), option_index.to_le_bytes().as_ref()],
+      seeds = [b"option", signer.key().as_ref(), (user.option_index+1).to_le_bytes().as_ref()],
         bump
     )]
     pub option_detail: Box<Account<'info, OptionDetail>>,

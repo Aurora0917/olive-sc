@@ -5,6 +5,7 @@ use anchor_spl::{
   token::{Token, Mint, TokenAccount}
 };
 
+// Create Lp PDA Account and init, store bump.
 pub fn initialize(ctx: Context<Initialize>,  bump: u8) -> Result<()> {
   let lp = &mut ctx.accounts.lp;
 
@@ -21,9 +22,13 @@ pub struct Initialize<'info> {
   #[account(mut)]
   pub signer: Signer<'info>,
 
+  // Wsol Mint Address
   pub wsol_mint: Box<Account<'info, Mint>>,
+
+  // USDC Mint Address
   pub usdc_mint: Box<Account<'info, Mint>>,
 
+  // LP PDA account stored Lp status including wsol, usdc account and locked amounts
   #[account(
     init, 
     payer = signer,  
@@ -33,6 +38,7 @@ pub struct Initialize<'info> {
   )]
   pub lp: Account<'info, Lp>,
 
+  // Wsol ATA account of Lp PDA.
   #[account(
     init,
     payer = signer,
@@ -41,6 +47,7 @@ pub struct Initialize<'info> {
   )]
   pub wsol_ata: Box<Account<'info, TokenAccount>>,
 
+  // USDC ATA account of Lp PDA.
   #[account(
     init,
     payer = signer,

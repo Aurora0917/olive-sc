@@ -20,15 +20,15 @@ pub fn buy_option(ctx: Context<BuyOption>, option_index: u64) -> Result<()> {
     let option_detail = &mut ctx.accounts.option_detail;
     let current_timestamp = Clock::get().unwrap().unix_timestamp;
 
+    // Check if the option that user want to sell to liquidity pool is exist
     require_eq!(
         option_index,
         option_detail.index,
         OptionError::InvalidOptionIndexError
     );
-
+    // If that option wasn't exercised
     if option_detail.valid == true {
-        let amount = option_detail.premium.mul(9).div(10);
-
+        // If that option is call option, restore WSOL amount from locked assets in liquidty pool
         if option_detail.option_type {
             require_gte!(
                 lp.locked_sol_amount,
@@ -37,6 +37,8 @@ pub fn buy_option(ctx: Context<BuyOption>, option_index: u64) -> Result<()> {
             );
             lp.locked_sol_amount -= option_detail.sol_amount;
             lp.sol_amount += option_detail.sol_amount;
+
+        // If that option is put option, restore USDC amount from locked assets in liquidty pool
         } else {
             require_gte!(
                 lp.locked_usdc_amount,
@@ -46,7 +48,11 @@ pub fn buy_option(ctx: Context<BuyOption>, option_index: u64) -> Result<()> {
             lp.locked_usdc_amount -= option_detail.usdc_amount;
             lp.usdc_amount += option_detail.usdc_amount;
         }
-        if option_detail.option_type {
+
+        // return premium removed sale fee, as paid unit.
+        if option_detail.premium_unit {
+            // Return value to users, remove sale fee.
+            let amount = option_detail.premium.mul(9).div(10);
             require_gte!(
                 lp_ata_wsol.amount,
                 amount,
@@ -66,6 +72,8 @@ pub fn buy_option(ctx: Context<BuyOption>, option_index: u64) -> Result<()> {
                 amount,
             )?;
         } else {
+            // Return value to users, remove sale fee.
+            let amount = option_detail.premium.mul(9).div(10);
             require_gte!(
                 lp_ata_usdc.amount,
                 amount,
@@ -85,6 +93,8 @@ pub fn buy_option(ctx: Context<BuyOption>, option_index: u64) -> Result<()> {
                 amount,
             )?;
         }
+
+        // Disable this option to prevent exercise
         option_detail.valid = false;
         option_detail.bought_back = current_timestamp as u64;
     }
