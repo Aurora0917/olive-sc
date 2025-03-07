@@ -41,7 +41,7 @@ Add liquidity to pool
 - if call option:
     - if token_price >= strike_price:
         - profit <- (token_price_in_usd - token_strike_price_in_usd) * num_of_contracts
-- if call option:
+- if call option: (this is supposed to be put)
     - if token_price <= strike_price:
         - profit <- (strike_price - token_price_in_usd) * num_of_contracts
 - reward_amt <- reward_fee * profit
