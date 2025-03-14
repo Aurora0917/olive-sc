@@ -1,0 +1,15 @@
+{
+    "name": "Rust Development Environment",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "rust-lang.rust-analyzer", // Rust Analyzer extension
+                "ms-vscode-remote.remote-containers", // Optional: Dev Containers support
+                "eamodio.gitlens" // Optional: GitLens for version control
+            ],
+            "settings": {
+                "rust-analyzer.checkOnSave.command": "clippy"
+            }
+        }
+    }
+}

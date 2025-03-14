@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use crate::state::lp::*;
+use crate::state::{lp::*, Multisig};
 use anchor_spl::{
   associated_token::AssociatedToken,
   token::{Token, Mint, TokenAccount}
@@ -27,6 +27,16 @@ pub struct Initialize<'info> {
 
   // USDC Mint Address
   pub usdc_mint: Box<Account<'info, Mint>>,
+
+  // Multisig account
+  #[account(
+    init,
+    payer = signer,
+    space = Multisig::LEN,
+    seeds = [b"multisig"],
+    bump
+  )]
+  pub multisig: Account<'info, Multisig>,
 
   // LP PDA account stored Lp status including wsol, usdc account and locked amounts
   #[account(

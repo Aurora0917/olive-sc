@@ -1,0 +1,10 @@
+version: '3.8'
+services:
+  solana-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/workspace
+    tty: true
+    command: bash
