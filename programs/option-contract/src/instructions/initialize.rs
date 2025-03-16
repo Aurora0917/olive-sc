@@ -36,7 +36,7 @@ pub struct Initialize<'info> {
     seeds = [b"multisig"],
     bump
   )]
-  pub multisig: Account<'info, Multisig>,
+  pub multisig: AccountLoader<'info, Multisig>,
 
   // LP PDA account stored Lp status including wsol, usdc account and locked amounts
   #[account(

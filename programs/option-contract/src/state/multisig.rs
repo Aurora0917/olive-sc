@@ -5,7 +5,8 @@ use {
     std::hash::Hasher,
 };
 
-#[account()]
+#[account(zero_copy)]
+#[repr(packed, C)]
 pub struct Multisig {
     pub num_signers: u8,
     pub num_signed: u8,
@@ -45,7 +46,7 @@ impl Multisig {
         instruction_accounts: &[AccountInfo],
         instruction_data: &[u8],
     ) -> u64 {
-        let mut hasher = AHasher::new_with_keys(697533735114380, 537268678243635);
+        let mut hasher = AHasher::default();
         for account in instruction_accounts {
             hasher.write(account.key.as_ref());
         }
