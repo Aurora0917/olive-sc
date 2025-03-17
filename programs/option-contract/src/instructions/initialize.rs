@@ -1,19 +1,18 @@
 use anchor_lang::prelude::*;
-use crate::state::{lp::*, Multisig};
-use anchor_spl::{
-  associated_token::AssociatedToken,
-  token::{Token, Mint, TokenAccount}
-};
+use crate::state::{Contract, Multisig};
+use anchor_spl::token::Token;
 
 // Create Lp PDA Account and init, store bump.
-pub fn initialize(ctx: Context<Initialize>,  bump: u8) -> Result<()> {
-  let lp = &mut ctx.accounts.lp;
+pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
+  let contract = &mut ctx.accounts.contract;
 
-  lp.sol_amount = 0;
-  lp.usdc_amount = 0;
-  lp.locked_sol_amount = 0;
-  lp.locked_usdc_amount = 0;
-  lp.bump = bump;
+  // initialize multisig, this will fail if account is already initialized
+  let mut multisig = ctx.accounts.multisig.load_init()?;
+  multisig.set_signers(ctx.remaining_accounts, 1)?;
+
+  // store PDA bumps
+  contract.bump = ctx.bumps.contract;
+  multisig.bump = ctx.bumps.multisig;
   Ok(())
 }
 
@@ -21,12 +20,6 @@ pub fn initialize(ctx: Context<Initialize>,  bump: u8) -> Result<()> {
 pub struct Initialize<'info> {
   #[account(mut)]
   pub signer: Signer<'info>,
-
-  // Wsol Mint Address
-  pub wsol_mint: Box<Account<'info, Mint>>,
-
-  // USDC Mint Address
-  pub usdc_mint: Box<Account<'info, Mint>>,
 
   // Multisig account
   #[account(
@@ -42,31 +35,11 @@ pub struct Initialize<'info> {
   #[account(
     init, 
     payer = signer,  
-    space=Lp::LEN,
-    seeds = [b"lp"],
+    space=Contract::LEN,
+    seeds = [b"contract"],
     bump,
   )]
-  pub lp: Account<'info, Lp>,
-
-  // Wsol ATA account of Lp PDA.
-  #[account(
-    init,
-    payer = signer,
-    associated_token::mint = wsol_mint,
-    associated_token::authority = lp,
-  )]
-  pub wsol_ata: Box<Account<'info, TokenAccount>>,
-
-  // USDC ATA account of Lp PDA.
-  #[account(
-    init,
-    payer = signer,
-    associated_token::mint = usdc_mint,
-    associated_token::authority = lp,
-  )]
-  pub usdc_ata: Box<Account<'info, TokenAccount>>,
-
+  pub contract: Account<'info, Contract>,
   pub token_program: Program<'info, Token>,
-  pub associated_token_program: Program<'info, AssociatedToken>,
   pub system_program: Program<'info, System>,
 }

@@ -31,3 +31,12 @@ pub enum MathError {
     #[msg("Overflow in arithmetic operation")]
     OverflowMathError,
 }
+
+
+#[error_code]
+pub enum ContractError {
+    #[msg("Oracle Account is invalid")]
+    InvalidOracleAccount,
+    #[msg("Stale oracle price")]
+    StaleOraclePrice,
+}
