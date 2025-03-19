@@ -56,8 +56,7 @@ impl Multisig {
         hasher.finish()
     }
 
-    /// Returns all accounts for the given context
-    pub fn get_account_infos<'info, T: ToAccountInfos<'info> + Bumps>(
+    pub fn get_account_infos<'info, T: ToAccountInfos<'info>+Bumps> (
         ctx: &Context<'_, '_, '_, 'info, T>,
     ) -> Vec<AccountInfo<'info>> {
         let mut infos = ctx.accounts.to_account_infos();
@@ -128,7 +127,7 @@ impl Multisig {
 
     /// Signs multisig and returns Ok(0) if there are enough signatures to continue or Ok(signatures_left) otherwise.
     /// If Err() is returned then signature was not recognized and transaction must be aborted.
-    pub fn sign_multisig(
+    pub fn sign_multisig<'info>(
         &mut self,
         signer_account: &AccountInfo,
         instruction_accounts: &[AccountInfo],

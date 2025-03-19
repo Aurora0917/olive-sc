@@ -12,3 +12,6 @@ pub struct Lp {
 impl Lp {
     pub const LEN: usize = 8 * 4 + 1 + 8;
 }
+
+
+// TODO: will remove this state once pool state is completed

@@ -207,3 +207,61 @@ pub fn checked_decimal_div(
         )?)
     }
 }
+
+pub fn checked_ceil_div<T>(arg1: T, arg2: T) -> Result<T>
+where
+    T: num_traits::PrimInt + Display,
+{
+    if arg1 > T::zero() {
+        if arg1 == arg2 && arg2 != T::zero() {
+            return Ok(T::one());
+        }
+        if let Some(res) = (arg1 - T::one()).checked_div(&arg2) {
+            Ok(res + T::one())
+        } else {
+            msg!("Error: Overflow in {} / {}", arg1, arg2);
+            err!(MathError::OverflowMathError)
+        }
+    } else if let Some(res) = arg1.checked_div(&arg2) {
+        Ok(res)
+    } else {
+        msg!("Error: Overflow in {} / {}", arg1, arg2);
+        err!(MathError::OverflowMathError)
+    }
+}
+
+pub fn checked_decimal_ceil_mul(
+    coefficient1: u64,
+    exponent1: i32,
+    coefficient2: u64,
+    exponent2: i32,
+    target_exponent: i32,
+) -> Result<u64> {
+    if coefficient1 == 0 || coefficient2 == 0 {
+        return Ok(0);
+    }
+    let target_power = checked_sub(checked_add(exponent1, exponent2)?, target_exponent)?;
+    if target_power >= 0 {
+        checked_as_u64(checked_mul(
+            checked_mul(coefficient1 as u128, coefficient2 as u128)?,
+            checked_pow(10u128, target_power as usize)?,
+        )?)
+    } else {
+        checked_as_u64(checked_ceil_div(
+            checked_mul(coefficient1 as u128, coefficient2 as u128)?,
+            checked_pow(10u128, (-target_power) as usize)?,
+        )?)
+    }
+}
+
+pub fn scale_to_exponent(arg: u64, exponent: i32, target_exponent: i32) -> Result<u64> {
+    if target_exponent == exponent {
+        return Ok(arg);
+    }
+    let delta = checked_sub(target_exponent, exponent)?;
+    if delta > 0 {
+        checked_div(arg, checked_pow(10, delta as usize)?)
+    } else {
+        checked_mul(arg, checked_pow(10, (-delta) as usize)?)
+    }
+}

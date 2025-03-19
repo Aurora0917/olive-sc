@@ -16,6 +16,9 @@ pub enum PoolError {
     InvalidWithdrawError,
     InvalidPoolBalanceError,
     InvalidSignerBalanceError,
+    InvalidCustodyTokenError,
+    InvalidPoolState,
+    InvalidCustodyState
 }
 
 #[error_code]

@@ -12,6 +12,7 @@ pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
 
   // store PDA bumps
   contract.bump = ctx.bumps.contract;
+  contract.transfer_authority_bump = ctx.bumps.transfer_authority;
   multisig.bump = ctx.bumps.multisig;
   Ok(())
 }
@@ -39,7 +40,18 @@ pub struct Initialize<'info> {
     seeds = [b"contract"],
     bump,
   )]
-  pub contract: Account<'info, Contract>,
+  pub contract: Box<Account<'info, Contract>>,
+
+  /// CHECK: empty PDA, will be set as authority for token accounts
+  #[account(
+    init,
+    payer = signer,
+    space = 0,
+    seeds = [b"transfer_authority"],
+    bump
+  )]
+  pub transfer_authority: AccountInfo<'info>,
+
   pub token_program: Program<'info, Token>,
   pub system_program: Program<'info, System>,
 }
