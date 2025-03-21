@@ -10,6 +10,15 @@ pub struct Assets {
     pub locked: u64,
 }
 
+#[derive(Copy, Clone, PartialEq, AnchorSerialize, AnchorDeserialize, Default, Debug)]
+pub struct Fees {
+    // fees have implied BPS_DECIMALS decimals
+    pub ratio_mult: u64,
+    pub add_liquidity: u64,
+    pub remove_liquidity: u64,
+    pub close_position: u64,
+}
+
 #[account]
 #[derive(Default, Debug, PartialEq)]
 pub struct Custody {
@@ -19,20 +28,8 @@ pub struct Custody {
     pub token_account: Pubkey,
     pub decimals: u8,
     pub oracle: Pubkey,
-    // pub pricing: PricingParams,
-    // pub permissions: Permissions,
-    // pub fees: Fees,
-    // pub borrow_rate: BorrowRateParams,
-
-    // dynamic variables
     pub assets: Assets,
-    // pub collected_fees: FeesStats,
-    // pub volume_stats: VolumeStats,
-    // pub trade_stats: TradeStats,
-    // pub long_positions: PositionStats,
-    // pub short_positions: PositionStats,
-    // pub borrow_rate_state: BorrowRateState,
-
+    pub fees: Fees, // Maintaining token ratio constant
     // bumps for address validation
     pub bump: u8,
     pub token_account_bump: u8,
@@ -45,13 +42,9 @@ impl Custody {
         self.token_account != Pubkey::default()
             && self.mint != Pubkey::default()
             && self.oracle != Pubkey::default()
-        // && self.oracle.validate()
-        // && self.pricing.validate()
-        // && self.fees.validate()
-        // && self.borrow_rate.validate()
     }
 
-    pub fn lock_funds(&mut self, amount:u64) -> Result<()> {
+    pub fn lock_funds(&mut self, amount: u64) -> Result<()> {
         self.assets.locked = math::checked_add(self.assets.locked, amount)?;
         if self.assets.owned < self.assets.locked {
             Err(ProgramError::InsufficientFunds.into())

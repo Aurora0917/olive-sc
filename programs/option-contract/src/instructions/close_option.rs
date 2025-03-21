@@ -10,7 +10,7 @@ use anchor_spl::{
     token::{self, Mint, Token, TokenAccount, Transfer as SplTransfer},
 };
 
-pub fn buy_option(ctx: Context<BuyOption>, option_index: u64) -> Result<()> {
+pub fn close_option(ctx: Context<BuyOption>, option_index: u64) -> Result<()> {
     let signer_ata_wsol = &mut ctx.accounts.signer_ata_wsol;
     let lp_ata_wsol = &mut ctx.accounts.lp_ata_wsol;
     let signer_ata_usdc = &mut ctx.accounts.signer_ata_usdc;

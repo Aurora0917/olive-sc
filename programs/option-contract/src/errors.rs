@@ -42,4 +42,7 @@ pub enum ContractError {
     InvalidOracleAccount,
     #[msg("Stale oracle price")]
     StaleOraclePrice,
+    InsufficientAmountReturned,
+    TokenRatioOutOfRange,
+    CustodyAmountLimit
 }

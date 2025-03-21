@@ -1,9 +1,9 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::Token;
+use anchor_spl::token::{Mint, Token};
 
 use crate::state::{Contract, multisig::{Multisig, AdminInstruction}, Pool};
 
-#[derive(AnchorSerialize, AnchorDeserialize)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct AddPoolParams {
     pub name: String,
 }
@@ -39,7 +39,7 @@ pub fn add_pool<'info>(ctx: Context<'_, '_, '_, 'info, AddPool<'info>>, params: 
 
     pool.name = params.name.clone();
     pool.bump = ctx.bumps.pool;
-
+    pool.lp_token_bump = ctx.bumps.lp_token_mint;
     contract.pools.push(ctx.accounts.pool.key());
     Ok(0)
 }
@@ -76,6 +76,20 @@ pub struct AddPool<'info> {
         bump,
     )]
     pub pool: Box<Account<'info, Pool>>,
+
+    #[account(
+        seeds = [b"lp_token_mint",
+                params.name.as_bytes()],
+        bump
+    )]
+    pub lp_token_mint: Box<Account<'info, Mint>>,
+
+    /// CHECK: empty PDA, authority for token accounts
+    #[account(
+        seeds = [b"transfer_authority"],
+        bump = contract.transfer_authority_bump
+    )]
+    pub transfer_authority: AccountInfo<'info>,
 
     token_program: Program<'info, Token>,
     system_program: Program<'info, System>,

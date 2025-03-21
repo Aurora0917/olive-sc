@@ -45,8 +45,11 @@ impl OraclePrice {
             exponent: -(amount_and_decimals.1 as i32),
         }
     }
-
-    pub fn new_from_oracle(
+    pub fn get_price(&self) -> f64 {
+        let oracle_price = (self.price as f64) * 10f64.powi(self.exponent);
+        oracle_price
+    }
+     pub fn new_from_oracle(
         oracle_account: &AccountInfo,
         current_time: i64,
         use_ema: bool,

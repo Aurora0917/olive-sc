@@ -19,26 +19,6 @@ pub mod option_contract {
         instructions::initialize::initialize(ctx)
     }
 
-    // Withdraw USDC from Liquidity Pool
-    pub fn withdraw_usdc(ctx: Context<WithdrawUsdc>, amount: u64) -> Result<()> {
-        instructions::withdraw_usdc::withdraw_usdc(ctx, amount)
-    }
-
-    // Withdraw WSOL from Liquidity Pool
-    pub fn withdraw_wsol(ctx: Context<WithdrawWsol>, amount: u64) -> Result<()> {
-        instructions::withdraw_wsol::withdraw_wsol(ctx, amount)
-    }
-
-    // Deposit WSOL from Liquidity Pool
-    pub fn deposit_wsol(ctx: Context<DepositWsol>, amount: u64) -> Result<()> {
-        instructions::deposit_wsol::deposit_wsol(ctx, amount)
-    }
-
-    // Deposit USDC from Liquidity Pool
-    pub fn deposit_usdc(ctx: Context<DepositUsdc>, amount: u64) -> Result<()> {
-        instructions::deposit_usdc::deposit_usdc(ctx, amount)
-    }
-
     // Sell option froom liquidity to user
     pub fn sell_option(
         ctx: Context<SellOption>,
@@ -49,7 +29,7 @@ pub mod option_contract {
         is_call: bool,
         pay_sol: bool,
     ) -> Result<()> {
-        instructions::sell_option::sell_option(
+        instructions::open_option::open_option(
             ctx,
             amount,
             strike,
@@ -72,6 +52,6 @@ pub mod option_contract {
 
     // Buy option from user to liquidity pool before expired time by user
     pub fn buy_option(ctx: Context<BuyOption>, option_index: u64) -> Result<()> {
-        instructions::buy_option::buy_option(ctx, option_index)
+        instructions::close_option::close_option(ctx, option_index)
     }
 }

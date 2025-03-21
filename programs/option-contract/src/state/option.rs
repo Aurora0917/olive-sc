@@ -16,8 +16,9 @@ pub struct OptionDetail {
     pub premium: u64,
     pub premium_unit: bool, // sol - 1, usdc - 0
     pub option_type: bool,  // call - 1, put - 0
+    pub bump: u8
 }
 
 impl OptionDetail {
-    pub const LEN: usize = 8 * 9 + 1 + 1 + 8 + 1 * 2 + 8;
+    pub const LEN: usize = 8 * 9 + 1 + 1 + 8 + 1 * 2 + 8 + 1;
 }

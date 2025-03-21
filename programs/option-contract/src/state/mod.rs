@@ -1,4 +1,3 @@
-pub use lp::*;
 pub use option::*;
 pub use user::*;
 pub use multisig::*;
@@ -7,7 +6,6 @@ pub use oracle::*;
 pub use pool::*;
 pub use custody::*;
 
-pub mod lp;
 pub mod option;
 pub mod user;
 pub mod multisig;
