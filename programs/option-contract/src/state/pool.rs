@@ -55,7 +55,7 @@ impl Pool {
 
     fn get_current_ratio(&self, custody: &Custody, token_price: &OraclePrice) -> Result<u64> {
         let ratio = math::checked_as_u64(math::checked_div(
-            token_price.get_asset_amount_usd(custody.assets.owned, custody.decimals)? as u128,
+            token_price.get_asset_amount_usd(custody.token_owned, custody.decimals)? as u128,
             self.aum_usd,
         )?)?;
         Ok(ratio)
@@ -72,7 +72,7 @@ impl Pool {
             return Err(ProgramError::InvalidArgument.into());
         } else if amount_add == 0 && amount_remove == 0 {
             (
-                token_price.get_asset_amount_usd(custody.assets.owned, custody.decimals)? as u128,
+                token_price.get_asset_amount_usd(custody.token_owned, custody.decimals)? as u128,
                 self.aum_usd,
             )
         } else if amount_add > 0 {
@@ -81,7 +81,7 @@ impl Pool {
 
             (
                 token_price.get_asset_amount_usd(
-                    math::checked_add(custody.assets.owned, amount_add)?,
+                    math::checked_add(custody.token_owned, amount_add)?,
                     custody.decimals,
                 )? as u128,
                 math::checked_add(self.aum_usd, added_aum_usd)?,
@@ -90,12 +90,12 @@ impl Pool {
             let removed_aum_usd =
                 token_price.get_asset_amount_usd(amount_remove, custody.decimals)? as u128;
 
-            if removed_aum_usd >= self.aum_usd || amount_remove >= custody.assets.owned {
+            if removed_aum_usd >= self.aum_usd || amount_remove >= custody.token_owned {
                 (0, 0)
             } else {
                 (
                     token_price.get_asset_amount_usd(
-                        math::checked_sub(custody.assets.owned, amount_remove)?,
+                        math::checked_sub(custody.token_owned, amount_remove)?,
                         custody.decimals,
                     )? as u128,
                     math::checked_sub(self.aum_usd, removed_aum_usd)?,
@@ -111,7 +111,7 @@ impl Pool {
     }
 
     pub fn check_available_amount(&self, amount: u64, custody: &Custody) -> Result<bool> {
-        let available_amount = math::checked_sub(custody.assets.owned, custody.assets.locked)?;
+        let available_amount = math::checked_sub(custody.token_owned, custody.token_locked)?;
         Ok(available_amount >= amount)
     }
 
@@ -135,7 +135,7 @@ impl Pool {
 
             let token_price = OraclePrice::new_from_oracle(&accounts[oracle_idx], curtime, false)?;
             let token_amount_usd =
-                token_price.get_asset_amount_usd(custody.assets.owned, custody.decimals)?;
+                token_price.get_asset_amount_usd(custody.token_owned, custody.decimals)?;
             pool_amount_usd = math::checked_add(pool_amount_usd, token_amount_usd as u128)?;
         }
 

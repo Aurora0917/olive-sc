@@ -2,7 +2,6 @@ use crate::{
     errors::OptionError,
     math,
     state::{Contract, Custody, OptionDetail, OraclePrice, Pool, User},
-    utils::black_scholes,
 };
 use anchor_lang::prelude::*;
 use anchor_spl::{
@@ -16,21 +15,21 @@ pub struct OpenOptionParams {
     strike: f64, // Strike price
     period: u64, // Number of days from option creation to expiration
     expired_time: u64, // when the option is expired : Unix epoch time
+    pool_name : String,
 }
 
-pub fn open_option(ctx: Context<SellOption>, params: OpenOptionParams) -> Result<()> {
+pub fn open_option(ctx: Context<OpenOption>, params: &OpenOptionParams) -> Result<()> {
     let owner = &ctx.accounts.owner;
     let token_program = &ctx.accounts.token_program;
     let option_detail = &mut ctx.accounts.option_detail;
     let contract = &ctx.accounts.contract;
-    let pool = &ctx.accounts.pool;
     let user = &mut ctx.accounts.user;
-
-    let custody = &ctx.accounts.custody;
+    let pool = &ctx.accounts.pool;
+    let custody = &mut ctx.accounts.custody;
     let custody_oracle_account = &ctx.accounts.custody_oracle_account;
-    let locked_custody = &ctx.accounts.locked_custody;
+    let locked_custody = &mut ctx.accounts.locked_custody;
 
-    let pay_custody = &ctx.accounts.pay_custody;
+    let pay_custody = &mut ctx.accounts.pay_custody;
     let pay_custody_oracle_account = &ctx.accounts.pay_custody_oracle_account;
     let pay_custody_token_account = &ctx.accounts.pay_custody_token_account;
 
@@ -46,9 +45,13 @@ pub fn open_option(ctx: Context<SellOption>, params: OpenOptionParams) -> Result
     let period_year = math::checked_as_f64(math::checked_float_div(params.period as f64, 365.0)?)?;
 
     // Calculate Premium in usd using black scholes formula.
-    let premium = black_scholes(oracle_price, params.strike, period_year, params.is_call);
+    let premium = OptionDetail::black_scholes(
+        oracle_price,
+        params.strike,
+        period_year,
+        custody.key() == locked_custody.key(),
+    );
 
-    let pay_custody_id = pool.get_token_id(&ctx.accounts.custody.key())?;
     let pay_token_price = OraclePrice::new_from_oracle(pay_custody_oracle_account, curtime, false)?;
 
     // Calculate Premium in pay_toke amount
@@ -78,39 +81,35 @@ pub fn open_option(ctx: Context<SellOption>, params: OpenOptionParams) -> Result
     )?;
 
     // Add premium to liquidity pool
-    pay_custody.assets.owned = math::checked_add(pay_custody.assets.owned, pay_amount)?;
-    option_detail.premium = premium_sol;
+    pay_custody.token_owned = math::checked_add(pay_custody.token_owned, pay_amount)?;
+    option_detail.premium = pay_amount;
+    option_detail.premium_asset = pay_custody.key();
 
-    // Lock assets for call(covered sol)/ put(secured-cash usdc) option
-    if custody.key() == locked_custody.key() { // Call
-        require_gte!(custody.assets.owned , math::checked_sub(custody.assets.locked, params.amount)? , OptionError::InvalidPoolBalanceError);
-        custody.assets.locked += params.amount as u64;
-
-        
-        lp.sol_amount -= amount as u64;
-        option_detail.sol_amount = amount;
-    } else {
-        require_gte!(lp.usdc_amount, amount, OptionError::InvalidPoolBalanceError);
-        lp.locked_usdc_amount += amount as u64;
-        lp.usdc_amount -= amount as u64;
-        option_detail.usdc_amount = amount;
-    }
+    require_gte!(
+        locked_custody.token_owned,
+        math::checked_add(locked_custody.token_locked, params.amount)?,
+        OptionError::InvalidPoolBalanceError
+    );
+    locked_custody.token_locked += params.amount as u64;
 
     // store option data
+    option_detail.amount = params.amount;
     option_detail.index = option_index;
-    option_detail.period = period;
-    option_detail.expired_date = expired_time as u64;
-    option_detail.strike_price = strike;
-    option_detail.premium_unit = pay_sol;
-    option_detail.option_type = is_call;
+    option_detail.period = params.period;
+    option_detail.expired_date = params.expired_time as u64;
+    option_detail.strike_price = params.strike;
     option_detail.valid = true;
+    option_detail.locked_asset = locked_custody.key();
+    option_detail.pool = pool.key();
+    option_detail.custody = custody.key();
     user.option_index = option_index;
 
     Ok(())
 }
 
 #[derive(Accounts)]
-pub struct SellOption<'info> {
+#[instruction(params: OpenOptionParams)]
+pub struct OpenOption<'info> {
     #[account(mut)]
     pub owner: Signer<'info>,
 
@@ -137,7 +136,7 @@ pub struct SellOption<'info> {
     #[account(
         mut,
         seeds = [b"pool",
-                 pool.name.as_bytes()],
+                 params.pool_name.as_bytes()],
         bump = pool.bump
     )]
     pub pool: Box<Account<'info, Pool>>,
@@ -149,7 +148,7 @@ pub struct SellOption<'info> {
                  custody.mint.as_ref()],
         bump = custody.bump
     )]
-    pub custody: Box<Account<'info, Custody>>,
+    pub custody: Box<Account<'info, Custody>>, // Target price asset
 
     /// CHECK: oracle account for the position token
     #[account(
@@ -184,7 +183,7 @@ pub struct SellOption<'info> {
                  pay_custody.mint.as_ref()],
         bump = pay_custody.bump
     )]
-    pub pay_custody: Box<Account<'info, Custody>>,
+    pub pay_custody: Box<Account<'info, Custody>>, // premium pay asset
 
     #[account(
         seeds = [b"custody_token_account",
@@ -207,7 +206,7 @@ pub struct SellOption<'info> {
                  locked_custody.mint.as_ref()],
         bump = locked_custody.bump
     )]
-    pub locked_custody: Box<Account<'info, Custody>>,
+    pub locked_custody: Box<Account<'info, Custody>>, // locked asset
 
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,

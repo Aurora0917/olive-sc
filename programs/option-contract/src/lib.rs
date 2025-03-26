@@ -1,57 +1,115 @@
 #![allow(unexpected_cfgs)]
-
+#![allow(clippy::result_large_err)]
 use anchor_lang::prelude::*;
 use instructions::*;
 
 pub mod errors;
 pub mod instructions;
-pub mod state;
-pub mod utils;
 pub mod math;
+pub mod state;
 
-declare_id!("6h756PU3oXMfQhUXkvcUjspGf9BpYqRUvYPhgQgc3owQ");
+declare_id!("6PJkfHcuDPttDRBPUPwc7NryNW8vk3uL9ffbmUMGqqs1");
 
 #[program]
 pub mod option_contract {
     use super::*;
-    // Initialize smart contract Accounts - Lp PDA
+    // Initialize smart contract Accounts
     pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
         instructions::initialize::initialize(ctx)
     }
 
-    // Sell option froom liquidity to user
-    pub fn sell_option(
-        ctx: Context<SellOption>,
-        amount: u64,
-        strike: f64,
-        period: u64,
-        expired_time: u64,
-        is_call: bool,
-        pay_sol: bool,
+    // Add admins as multisig signers
+    pub fn set_signers<'info>(
+        ctx: Context<'_, '_, '_, 'info, SetAdminSigners<'info>>,
+        params: SetAdminSignersParams,
+    ) -> Result<u8> {
+        instructions::set_signers::set_signers(ctx, &params)
+    }
+
+    // Create LP token for each Pool
+    pub fn create_lp_mint(ctx: Context<CreatLpMint>, params: LpTokenMintData) -> Result<()> {
+        instructions::create_lp_mint::create_lp_mint(ctx, &params)
+    }
+
+    // Add Pool with multi sig
+    pub fn add_pool<'info>(
+        ctx: Context<'_, '_, '_, 'info, AddPool<'info>>,
+        params: AddPoolParams,
+    ) -> Result<u8> {
+        instructions::add_pool::add_pool(ctx, &params)
+    }
+
+    // Remove Pool with multi sig
+    pub fn remove_pool<'info>(
+        ctx: Context<'_, '_, '_, 'info, RemovePool<'info>>,
+        params: RemovePoolParams,
+    ) -> Result<u8> {
+        instructions::remove_pool::remove_pool(ctx, &params)
+    }
+
+    // Make Storate in Pool for new custody
+    pub fn realloc_pool(ctx: Context<RealocPool>, params: ReallocPoolParams) -> Result<()> {
+        instructions::realloc_pool::realloc_pool(ctx, &params)
+    }
+
+    // Add Custody with multi sig
+    pub fn add_custody<'info>(
+        ctx: Context<'_, '_, '_, 'info, AddCustody<'info>>,
+        params: AddCustodyParams,
+    ) -> Result<u8> {
+        instructions::add_custody::add_custody(ctx, &params)
+    }
+    // Remove Custody with multi sig
+    pub fn remove_custody<'info>(
+        ctx: Context<'_, '_, '_, 'info, RemoveCustody<'info>>,
+        params: RemoveCustodyParams,
+    ) -> Result<u8> {
+        instructions::remove_custody::remove_custody(ctx, &params)
+    }
+
+    // Add liquidity 
+    pub fn add_liquidity<'info>(
+        ctx: Context<'_, '_, 'info, 'info, AddLiquidity<'info>>,
+        params: AddLiquidityParams,
     ) -> Result<()> {
-        instructions::open_option::open_option(
-            ctx,
-            amount,
-            strike,
-            period,
-            expired_time,
-            is_call,
-            pay_sol,
-        )
+        instructions::add_liquidity::add_liquidity(ctx, &params)
+    }
+    // Remove liquidity
+    pub fn remove_liquidity<'info>(
+        ctx: Context<'_, '_, 'info, 'info, RemoveLiquidity<'info>>,
+        params: RemoveLiquidityParams,
+    ) -> Result<()> {
+        instructions::remove_liquidity::remove_liquidity(ctx, &params)
     }
 
-    // Exercise option before expired time by user
-    pub fn exercise_option(ctx: Context<ExerciseOption>, option_index: u64) -> Result<()> {
-        instructions::exercise_option::exercise_option(ctx, option_index)
-    }
-
-    // Exercise option after expired time by user
-    pub fn expire_option(ctx: Context<ExpireOption>, option_index: u64, price: f64) -> Result<()> {
-        instructions::expire_option::expire_option(ctx, option_index, price)
+    // Sell option froom liquidity to user
+    pub fn open_option(ctx: Context<OpenOption>, params: OpenOptionParams) -> Result<()> {
+        instructions::open_option::open_option(ctx, &params)
     }
 
     // Buy option from user to liquidity pool before expired time by user
-    pub fn buy_option(ctx: Context<BuyOption>, option_index: u64) -> Result<()> {
-        instructions::close_option::close_option(ctx, option_index)
+    pub fn close_option(ctx: Context<CloseOption>, params: CloseOptionParams) -> Result<()> {
+        instructions::close_option::close_option(ctx, &params)
+    }
+
+    // Exercise option before expired time by user
+    pub fn exercise_option(
+        ctx: Context<ExerciseOption>,
+        params: ExerciseOptionParams,
+    ) -> Result<()> {
+        instructions::exercise_option::exercise_option(ctx, &params)
+    }
+
+    // Exercise option after expired time by bot
+    pub fn auto_exercise(
+        ctx: Context<AutoExerciseOption>,
+        params: AutoExerciseOptionParams,
+    ) -> Result<()> {
+        instructions::auto_exercise::auto_exercise(ctx, &params)
+    }
+
+    // Claim "in the money" option after expired time by user
+    pub fn claim_option(ctx: Context<ClaimOption>, params: ClaimOptionParams) -> Result<()> {
+        instructions::claim_option::claim_option(ctx, &params)
     }
 }

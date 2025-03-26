@@ -11,6 +11,7 @@ use crate::{
 #[derive(AnchorSerialize, AnchorDeserialize)]
 pub struct RemoveCustodyParams {
     pub ratios: Vec<TokenRatios>,
+    pub pool_name: String
 }
 
 pub fn remove_custody<'info>(
@@ -58,7 +59,7 @@ pub fn remove_custody<'info>(
 }
 
 #[derive(Accounts)]
-#[instruction(name: String)]
+#[instruction(params: RemoveCustodyParams)]
 pub struct RemoveCustody<'info> {
     #[account(mut)]
     pub signer: Signer<'info>,
@@ -83,33 +84,28 @@ pub struct RemoveCustody<'info> {
         (pool.ratios.len() + 1) * std::mem::size_of::<TokenRatios>(),
         realloc::payer = signer,
         realloc::zero = false,
-        seeds = [b"pool", pool.name.as_bytes()],
+        seeds = [b"pool", params.pool_name.as_bytes()],
         bump = pool.bump,
     )]
     pub pool: Box<Account<'info, Pool>>,
 
     #[account(
-        init_if_needed,
-        payer = signer,
-        space = Custody::LEN,
         seeds = [b"custody",
                  pool.key().as_ref(),
                  custody_token_mint.key().as_ref()],
         bump
     )]
-    pub custody: Box<Account<'info, Custody>>,
+    pub custody: Account<'info, Custody>,
 
     #[account(
-        init_if_needed,
-        payer = signer,
         token::mint = custody_token_mint,
         token::authority = transfer_authority, // PDA
         seeds = [b"custody_token_account",
                  pool.key().as_ref(),
                  custody_token_mint.key().as_ref()],
-        bump
+        bump = custody.token_account_bump
     )]
-    pub custody_token_account: Box<Account<'info, TokenAccount>>,
+    pub custody_token_account: Account<'info, TokenAccount>,
 
     /// CHECK: empty PDA, authority for token accounts
     #[account(

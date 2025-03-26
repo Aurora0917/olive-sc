@@ -78,8 +78,13 @@ pub struct AddPool<'info> {
     pub pool: Box<Account<'info, Pool>>,
 
     #[account(
+        init,
+        payer = signer,
+        mint::authority = transfer_authority,
+        mint::freeze_authority = transfer_authority,
+        mint::decimals = Contract::LP_DECIMALS,
         seeds = [b"lp_token_mint",
-                params.name.as_bytes()],
+            params.name.as_bytes()],
         bump
     )]
     pub lp_token_mint: Box<Account<'info, Mint>>,

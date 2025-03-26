@@ -4,24 +4,22 @@ use crate::{
     state::{Contract, Custody, OptionDetail, OraclePrice, Pool, User},
 };
 use anchor_lang::prelude::*;
-use anchor_spl::{
-    associated_token::AssociatedToken,
-    token::{Token, TokenAccount},
-};
+use anchor_spl::{associated_token::AssociatedToken, token::Token};
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
-pub struct ExerciseOptionParams {
+pub struct AutoExerciseOptionParams {
+    pub user: Pubkey,
     pub option_index: u64,
-    pub pool_name: String
+    pub pool_name: String,
 }
 
-pub fn exercise_option(ctx: Context<ExerciseOption>, params: &ExerciseOptionParams) -> Result<()> {
-    let token_program = &ctx.accounts.token_program;
+pub fn auto_exercise(
+    ctx: Context<AutoExerciseOption>,
+    params: &AutoExerciseOptionParams,
+) -> Result<()> {
     let option_detail = &mut ctx.accounts.option_detail;
     let contract = &ctx.accounts.contract;
     let user = &mut ctx.accounts.user;
-    let funding_account = &mut ctx.accounts.funding_account;
-    let transfer_authority = &mut ctx.accounts.transfer_authority;
     let custody: &mut Box<Account<'_, Custody>> = &mut ctx.accounts.custody;
     let locked_custody = &mut ctx.accounts.locked_custody;
     let locked_oracle = &ctx.accounts.locked_oracle;
@@ -32,8 +30,8 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, params: &ExerciseOptionPara
 
     // Check if option is available to exercise, before expired time.
     require_gt!(
-        option_detail.expired_date,
         current_timestamp as u64,
+        option_detail.expired_date,
         OptionError::InvalidTimeError
     );
 
@@ -49,75 +47,43 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, params: &ExerciseOptionPara
 
     if custody.key() == locked_custody.key() {
         // call option
-        require_gte!(
-            oracle_price,
-            option_detail.strike_price,
-            OptionError::InvalidPriceRequirementError
-        );
-        // Calculate Sol Amount from Option Detail Value : call / covered sol
-        let amount = ((oracle_price - option_detail.strike_price) / option_detail.strike_price)
-            * (option_detail.amount as f64);
+        if oracle_price > option_detail.strike_price {
+            // Calculate Sol Amount from Option Detail Value : call / covered sol
+            let amount = ((oracle_price - option_detail.strike_price) / option_detail.strike_price)
+                * (option_detail.amount as f64);
 
-        // send profit to user
-        contract.transfer_tokens(
-            locked_oracle.to_account_info(),
-            funding_account.to_account_info(),
-            transfer_authority.to_account_info(),
-            token_program.to_account_info(),
-            amount as u64,
-        )?;
-
-        option_detail.profit = amount as u64;
+            option_detail.claimed = amount as u64;
+        } else {
+            option_detail.claimed = 0;
+            option_detail.profit = 0;
+        }
     } else {
-        require_gte!(
-            option_detail.strike_price,
-            oracle_price,
-            OptionError::InvalidPriceRequirementError
-        );
+        if option_detail.strike_price > oracle_price {
+            // Calculate Profit amount with option detail values:  put / case-secured usdc
+            let amount =
+                (option_detail.strike_price - oracle_price) * (option_detail.amount as f64);
 
-        // Calculate Profit amount with option detail values:  put / case-secured usdc
-        let amount = (option_detail.strike_price - oracle_price) * (option_detail.amount as f64);
-
-        // send profit to user
-        contract.transfer_tokens(
-            locked_oracle.to_account_info(),
-            funding_account.to_account_info(),
-            transfer_authority.to_account_info(),
-            token_program.to_account_info(),
-            amount as u64,
-        )?;
-
-        option_detail.profit = amount as u64;
+            option_detail.claimed = amount as u64;
+        } else {
+            option_detail.claimed = 0;
+            option_detail.profit = 0;
+        }
     }
 
     option_detail.exercised = current_timestamp as u64;
     option_detail.valid = false;
 
     locked_custody.token_locked =
-    math::checked_sub(locked_custody.token_locked, option_detail.amount)?;
+        math::checked_sub(locked_custody.token_locked, option_detail.amount)?;
 
     Ok(())
 }
 
 #[derive(Accounts)]
-#[instruction(params: ExerciseOptionParams)]
-pub struct ExerciseOption<'info> {
+#[instruction(params: AutoExerciseOptionParams)]
+pub struct AutoExerciseOption<'info> {
     #[account(mut)]
-    pub owner: Signer<'info>,
-
-    #[account(
-        mut,
-        constraint = funding_account.mint == locked_custody.mint,
-        has_one = owner
-    )]
-    pub funding_account: Box<Account<'info, TokenAccount>>,
-
-    /// CHECK: empty PDA, authority for token accounts
-    #[account(
-        seeds = [b"transfer_authority"],
-        bump = contract.transfer_authority_bump
-    )]
-    pub transfer_authority: AccountInfo<'info>,
+    pub tester: Signer<'info>,
 
     #[account(
         seeds = [b"contract"],
@@ -143,13 +109,13 @@ pub struct ExerciseOption<'info> {
     pub custody: Box<Account<'info, Custody>>, // Target price asset
 
     #[account(
-    seeds = [b"user", owner.key().as_ref()],
+    seeds = [b"user", params.user.key().as_ref()],
     bump,
   )]
     pub user: Box<Account<'info, User>>,
 
     #[account(
-      seeds = [b"option", owner.key().as_ref(), 
+      seeds = [b"option", params.user.key().as_ref(), 
             params.option_index.to_le_bytes().as_ref(),
             pool.key().as_ref(), custody.key().as_ref(),],
         bump

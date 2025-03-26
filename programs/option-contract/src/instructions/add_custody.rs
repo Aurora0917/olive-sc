@@ -1,22 +1,18 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
 
-use crate::state::{Contract, Custody, Multisig, Pool, TokenRatios};
+use crate::state::{Contract, Custody, Multisig, Pool};
 
 #[derive(AnchorSerialize, AnchorDeserialize)]
 pub struct AddCustodyParams {
     pub oracle: Pubkey,
-    pub ratios: Vec<TokenRatios>,
+    pub pool_name : String
 }
 
 pub fn add_custody<'info>(
     ctx: Context<'_, '_, '_, 'info, AddCustody<'info>>,
     params: &AddCustodyParams,
 ) -> Result<u8> {
-    // validate inputs
-    if params.ratios.len() != ctx.accounts.pool.ratios.len() + 1 {
-        return Err(ProgramError::InvalidArgument.into());
-    }
 
     // validate signatures
     let mut multisig = ctx.accounts.multisig.load_mut()?;
@@ -35,18 +31,10 @@ pub fn add_custody<'info>(
     }
 
     let pool =&mut ctx.accounts.pool;
-    if pool.get_token_id(&ctx.accounts.custody.key()).is_ok() {
-        // return error if custody is already initialized
-        return Err(ProgramError::AccountAlreadyInitialized.into());
-    }
-
-    // update pool data
-    pool.custodies.push(ctx.accounts.custody.key());
-    pool.ratios = params.ratios.clone();
+    require_keys_eq!(*pool.custodies.last().unwrap(), ctx.accounts.custody.key());
 
     // record custody data
     let custody =&mut ctx.accounts.custody;
-    custody.pool = pool.key();
     custody.mint = ctx.accounts.custody_token_mint.key();
     custody.token_account = ctx.accounts.custody_token_account.key();
     custody.decimals = ctx.accounts.custody_token_mint.decimals;
@@ -77,18 +65,14 @@ pub struct AddCustody<'info> {
         seeds = [b"contract"],
         bump = contract.bump,
       )]
-    pub contract: Account<'info, Contract>,
+    pub contract: Box<Account<'info, Contract>>,
 
     #[account(
         mut,
-        realloc = Pool::LEN + (pool.custodies.len() + 1) * std::mem::size_of::<Pubkey>() +
-        (pool.ratios.len() + 1) * std::mem::size_of::<TokenRatios>(),
-        realloc::payer = signer,
-        realloc::zero = false,
-        seeds = [b"pool", pool.name.as_bytes()],
+        seeds = [b"pool", params.pool_name.as_bytes()],
         bump = pool.bump,
     )]
-    pub pool: Account<'info, Pool>,
+    pub pool: Box<Account<'info, Pool>>,
 
     #[account(
         init_if_needed,
@@ -111,7 +95,7 @@ pub struct AddCustody<'info> {
                  custody_token_mint.key().as_ref()],
         bump
     )]
-    pub custody_token_account: Box<Account<'info, TokenAccount>>,
+    pub custody_token_account: Account<'info, TokenAccount>,
 
     /// CHECK: empty PDA, authority for token accounts
     #[account(
@@ -123,5 +107,4 @@ pub struct AddCustody<'info> {
     pub custody_token_mint: Box<Account<'info, Mint>>,
     token_program: Program<'info, Token>,
     system_program: Program<'info, System>,
-    rent: Sysvar<'info, Rent>,
 }

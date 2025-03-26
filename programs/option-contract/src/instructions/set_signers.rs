@@ -22,7 +22,7 @@ pub struct SetAdminSignersParams {
     pub min_signatures: u8,
 }
 
-pub fn set_admin_signers<'info>(
+pub fn set_signers<'info>(
     ctx: Context<'_, '_, '_, 'info, SetAdminSigners<'info>>,
     params: &SetAdminSignersParams,
 ) -> Result<u8> {

@@ -47,7 +47,7 @@ pub struct RemoveLiquidity<'info> {
     #[account(
         mut,
         seeds = [b"pool",
-                 pool.name.as_bytes()],
+                 params.pool_name.as_bytes()],
         bump = pool.bump
     )]
     pub pool: Box<Account<'info, Pool>>,
@@ -94,6 +94,7 @@ pub struct RemoveLiquidity<'info> {
 pub struct RemoveLiquidityParams {
     pub lp_amount_in: u64,
     pub min_amount_out: u64,
+    pub pool_name: String
 }
 
 pub fn remove_liquidity<'info>(
@@ -154,7 +155,7 @@ pub fn remove_liquidity<'info>(
     );
 
     require!(
-        math::checked_sub(custody.assets.owned, custody.assets.locked)? >= withdrawal_amount,
+        math::checked_sub(custody.token_owned, custody.token_locked)? >= withdrawal_amount,
         ContractError::CustodyAmountLimit
     );
 
@@ -180,7 +181,7 @@ pub fn remove_liquidity<'info>(
 
     // update custody stats
     
-    custody.assets.owned = math::checked_sub(custody.assets.owned, withdrawal_amount)?;
+    custody.token_owned = math::checked_sub(custody.token_owned, withdrawal_amount)?;
 
     // update pool stats
     msg!("Update pool stats");

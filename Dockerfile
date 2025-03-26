@@ -16,7 +16,7 @@
 # # Install Rust (required for Solana smart contract development)
 # RUN curl --proto '=https' --tlsv1.2 -sSfL https://raw.githubusercontent.com/solana-developers/solana-install/main/install.sh | bash
 
-FROM rust:1.82-slim
+FROM rust:1.84-slim
 
 # Set environment variables for non-interactive installations
 ENV DEBIAN_FRONTEND=noninteractive

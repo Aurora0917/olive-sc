@@ -46,7 +46,7 @@ impl Multisig {
         instruction_accounts: &[AccountInfo],
         instruction_data: &[u8],
     ) -> u64 {
-        let mut hasher = AHasher::default();
+        let mut hasher = AHasher::new_with_keys(1234, 5678);
         for account in instruction_accounts {
             hasher.write(account.key.as_ref());
         }

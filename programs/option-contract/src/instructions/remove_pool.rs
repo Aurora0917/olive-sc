@@ -3,7 +3,9 @@ use anchor_lang::prelude::*;
 use crate::{errors::PoolError, state::{multisig::{AdminInstruction, Multisig}, Contract, Pool}};
 
 #[derive(AnchorSerialize, AnchorDeserialize)]
-pub struct RemovePoolParams {}
+pub struct RemovePoolParams {
+    pool_name: String
+}
 
 pub fn remove_pool<'info>(ctx: Context<'_, '_, '_, 'info, RemovePool<'info>>, params: &RemovePoolParams) -> Result<u8> {
     // validate signatures
@@ -41,6 +43,7 @@ pub fn remove_pool<'info>(ctx: Context<'_, '_, '_, 'info, RemovePool<'info>>, pa
 
 
 #[derive(Accounts)]
+#[instruction(params: RemovePoolParams)]
 pub struct RemovePool<'info> {
     #[account(mut)]
     pub signer: Signer<'info>,
@@ -64,7 +67,7 @@ pub struct RemovePool<'info> {
     
     #[account(
         mut,
-        seeds = [b"pool", pool.name.as_bytes()],
+        seeds = [b"pool", params.pool_name.as_bytes()],
         bump,
         close = signer
     )]

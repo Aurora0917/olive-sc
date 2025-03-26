@@ -3,7 +3,7 @@
 use {
     crate::{
         errors::ContractError, math, state::{
-            contract, custody::Custody, oracle::OraclePrice, Contract, Pool
+            custody::Custody, oracle::OraclePrice, Contract, Pool
         }
     },
     anchor_lang::prelude::*,
@@ -46,7 +46,7 @@ pub struct AddLiquidity<'info> {
     #[account(
         mut,
         seeds = [b"pool",
-                 pool.name.as_bytes()],
+                 params.pool_name.as_bytes()],
         bump = pool.bump
     )]
     pub pool: Box<Account<'info, Pool>>,
@@ -93,6 +93,7 @@ pub struct AddLiquidity<'info> {
 pub struct AddLiquidityParams {
     pub amount_in: u64,
     pub min_lp_amount_out: u64,
+    pub pool_name: String
 }
 
 pub fn add_liquidity<'info>(ctx: Context<'_, '_, 'info, 'info, AddLiquidity<'info>>, params: &AddLiquidityParams) -> Result<()> {
@@ -171,7 +172,7 @@ pub fn add_liquidity<'info>(ctx: Context<'_, '_, 'info, 'info, AddLiquidity<'inf
         ctx.accounts.token_program.to_account_info(),
         lp_amount,
     )?;
-    custody.assets.owned = math::checked_add(custody.assets.owned, deposit_amount)?;
+    custody.token_owned = math::checked_add(custody.token_owned, deposit_amount)?;
 
     // update pool stats
     msg!("Update pool stats");
