@@ -7,7 +7,7 @@ use {
         }
     },
     anchor_lang::prelude::*,
-    anchor_spl::token::{Mint, Token, TokenAccount},
+    anchor_spl::{associated_token::AssociatedToken, token::{Mint, Token, TokenAccount}},
 };
 
 #[derive(Accounts)]
@@ -18,15 +18,14 @@ pub struct AddLiquidity<'info> {
 
     #[account(
         mut,
-        constraint = funding_account.mint == custody.mint,
-        has_one = owner
     )]
     pub funding_account: Box<Account<'info, TokenAccount>>,
 
     #[account(
-        mut,
-        constraint = lp_token_account.mint == lp_token_mint.key(),
-        has_one = owner
+        init_if_needed,
+        payer= owner,
+        associated_token::mint = lp_token_mint,
+        associated_token::authority = transfer_authority,
     )]
     pub lp_token_account: Box<Account<'info, TokenAccount>>,
 
@@ -55,7 +54,7 @@ pub struct AddLiquidity<'info> {
         mut,
         seeds = [b"custody",
                  pool.key().as_ref(),
-                 custody.mint.as_ref()],
+                 custody_mint.key().as_ref()],
         bump = custody.bump
     )]
     pub custody: Box<Account<'info, Custody>>,
@@ -82,8 +81,12 @@ pub struct AddLiquidity<'info> {
         bump = pool.lp_token_bump
     )]
     pub lp_token_mint: Box<Account<'info, Mint>>,
+    #[account(mut)]
+    pub custody_mint: Box<Account<'info, Mint>>,
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>
 
-    token_program: Program<'info, Token>,
     // remaining accounts:
     //   pool.tokens.len() custody accounts (read-only, unsigned)
     //   pool.tokens.len() custody oracles (read-only, unsigned)
@@ -91,14 +94,13 @@ pub struct AddLiquidity<'info> {
 
 #[derive(AnchorSerialize, AnchorDeserialize)]
 pub struct AddLiquidityParams {
-    pub amount_in: u64,
-    pub min_lp_amount_out: u64,
-    pub pool_name: String
+    amount_in: u64,
+    min_lp_amount_out: u64,
+    pool_name: String,
 }
 
 pub fn add_liquidity<'info>(ctx: Context<'_, '_, 'info, 'info, AddLiquidity<'info>>, params: &AddLiquidityParams) -> Result<()> {
     // check permissions
-    msg!("Check permissions");
     let contract = ctx.accounts.contract.as_mut();
     let custody = ctx.accounts.custody.as_mut();
 

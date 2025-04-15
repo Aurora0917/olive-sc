@@ -2,7 +2,7 @@ use crate::{math, state::{Contract, Custody, OptionDetail, Pool, User}};
 use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken,
-    token::{Token, TokenAccount},
+    token::{Mint, Token, TokenAccount},
 };
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
@@ -84,7 +84,7 @@ pub struct ClaimOption<'info> {
         mut,
         seeds = [b"custody",
                  pool.key().as_ref(),
-                 custody.mint.as_ref()],
+                 custody_mint.key().as_ref()],
         bump = custody.bump
     )]
     pub custody: Box<Account<'info, Custody>>, // locked asset
@@ -111,6 +111,8 @@ pub struct ClaimOption<'info> {
         constraint = locked_oracle.key() == locked_custody.oracle
     )]
     pub locked_oracle: AccountInfo<'info>,
+    #[account(mut)]
+    pub custody_mint: Box<Account<'info, Mint>>,
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,

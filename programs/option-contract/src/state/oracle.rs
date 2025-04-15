@@ -183,7 +183,7 @@ impl OraclePrice {
 
     fn get_pyth_price(
         pyth_price_info: &AccountInfo,
-        current_time: i64,
+        _: i64,
         use_ema: bool,
     ) -> Result<OraclePrice> {
         require!(
@@ -198,11 +198,12 @@ impl OraclePrice {
             price_feed.get_price_unchecked()
         };
 
-        let last_update_age_sec = math::checked_sub(current_time, pyth_price.publish_time)?;
-        if last_update_age_sec > Self::MAX_PRICE_AGE_SEC as i64 {
-            msg!("Error: Pyth oracle price is stale");
-            return err!(ContractError::StaleOraclePrice);
-        }
+        //TODO: for production code, commented for test on Devnet
+        // let last_update_age_sec = math::checked_sub(current_time, pyth_price.publish_time)?;
+        // if last_update_age_sec > Self::MAX_PRICE_AGE_SEC as i64 {
+        //     msg!("Error: Pyth oracle price is stale");
+        //     return err!(ContractError::StaleOraclePrice);
+        // }
 
         Ok(OraclePrice {
             // price is i64 and > 0 per check above

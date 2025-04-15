@@ -6,7 +6,7 @@ use crate::{
 use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken,
-    token::{Token, TokenAccount},
+    token::{Mint, Token, TokenAccount},
 };
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
@@ -137,7 +137,7 @@ pub struct ExerciseOption<'info> {
         mut,
         seeds = [b"custody",
                  pool.key().as_ref(),
-                 custody.mint.as_ref()],
+                 custody_mint.key().as_ref()],
         bump = custody.bump
     )]
     pub custody: Box<Account<'info, Custody>>, // Target price asset
@@ -160,7 +160,7 @@ pub struct ExerciseOption<'info> {
         mut,
         seeds = [b"custody",
                  pool.key().as_ref(),
-                 locked_custody.mint.as_ref()],
+                 locked_custody_mint.key().as_ref()],
         bump = locked_custody.bump
     )]
     pub locked_custody: Box<Account<'info, Custody>>, // locked asset
@@ -170,6 +170,10 @@ pub struct ExerciseOption<'info> {
         constraint = locked_oracle.key() == locked_custody.oracle
     )]
     pub locked_oracle: AccountInfo<'info>,
+    #[account(mut)]
+    pub custody_mint: Box<Account<'info, Mint>>,
+    #[account(mut)]
+    pub locked_custody_mint: Box<Account<'info, Mint>>,
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,

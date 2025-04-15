@@ -54,11 +54,15 @@ impl Pool {
     }
 
     fn get_current_ratio(&self, custody: &Custody, token_price: &OraclePrice) -> Result<u64> {
-        let ratio = math::checked_as_u64(math::checked_div(
-            token_price.get_asset_amount_usd(custody.token_owned, custody.decimals)? as u128,
-            self.aum_usd,
-        )?)?;
-        Ok(ratio)
+        if self.aum_usd == 0 {
+            Ok(0)
+        } else {
+            let ratio = math::checked_as_u64(math::checked_div(
+                token_price.get_asset_amount_usd(custody.token_owned, custody.decimals)? as u128,
+                self.aum_usd,
+            )?)?;
+            Ok(ratio)
+        }
     }
 
     fn get_new_ratio(
@@ -214,7 +218,7 @@ impl Pool {
             }
             Ordering::Equal => current_ratio != ratios.target,
         };
-
+        msg!("new_ratio: {}, ratios.target: {}", new_ratio, ratios.target);
         let ratio_fee = if new_ratio <= ratios.target {
             if ratios.target == ratios.min {
                 Contract::BPS_POWER
@@ -244,7 +248,7 @@ impl Pool {
                 )?,
             )?
         };
-
+        msg!("ratio_fee: {}", ratio_fee);
         let fee = if improved {
             math::checked_div(
                 math::checked_mul(base_fee as u128, Contract::BPS_POWER)?,
@@ -256,6 +260,7 @@ impl Pool {
                 Contract::BPS_POWER,
             )?
         };
+        msg!("fee: {}", fee);
 
         Self::get_fee_amount(
             math::checked_as_u64(fee)?,

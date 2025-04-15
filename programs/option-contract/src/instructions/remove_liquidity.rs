@@ -71,7 +71,7 @@ pub struct RemoveLiquidity<'info> {
         mut,
         seeds = [b"custody_token_account",
                  pool.key().as_ref(),
-                 custody.mint.as_ref()],
+                 custody_mint.key().as_ref()],
         bump = custody.token_account_bump
     )]
     pub custody_token_account: Box<Account<'info, TokenAccount>>,
@@ -83,6 +83,9 @@ pub struct RemoveLiquidity<'info> {
         bump = pool.lp_token_bump
     )]
     pub lp_token_mint: Box<Account<'info, Mint>>,
+
+    #[account(mut)]
+    pub custody_mint: Box<Account<'info, Mint>>,
 
     token_program: Program<'info, Token>,
     // remaining accounts:

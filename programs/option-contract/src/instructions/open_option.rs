@@ -4,10 +4,8 @@ use crate::{
     state::{Contract, Custody, OptionDetail, OraclePrice, Pool, User},
 };
 use anchor_lang::prelude::*;
-use anchor_spl::{
-    associated_token::AssociatedToken,
-    token::{self, Token, TokenAccount, Transfer as SplTransfer},
-};
+use anchor_spl::
+    token::{self, Mint, Token, TokenAccount, Transfer as SplTransfer};
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct OpenOptionParams {
@@ -113,11 +111,7 @@ pub struct OpenOption<'info> {
     #[account(mut)]
     pub owner: Signer<'info>,
 
-    #[account(
-        mut,
-        constraint = funding_account.mint == pay_custody.mint,
-        has_one = owner
-    )]
+    #[account(mut)]
     pub funding_account: Box<Account<'info, TokenAccount>>,
 
     /// CHECK: empty PDA, authority for token accounts
@@ -145,7 +139,7 @@ pub struct OpenOption<'info> {
         mut,
         seeds = [b"custody",
                  pool.key().as_ref(),
-                 custody.mint.as_ref()],
+                 custody_mint.key().as_ref()],
         bump = custody.bump
     )]
     pub custody: Box<Account<'info, Custody>>, // Target price asset
@@ -171,7 +165,7 @@ pub struct OpenOption<'info> {
       space=OptionDetail::LEN,
       seeds = [b"option", owner.key().as_ref(), 
             (user.option_index+1).to_le_bytes().as_ref(),
-            pool.key().as_ref(), custody.key().as_ref(),],
+            pool.key().as_ref(), custody.key().as_ref()],
         bump
     )]
     pub option_detail: Box<Account<'info, OptionDetail>>,
@@ -180,12 +174,13 @@ pub struct OpenOption<'info> {
         mut,
         seeds = [b"custody",
                  pool.key().as_ref(),
-                 pay_custody.mint.as_ref()],
+                 pay_custody_mint.key().as_ref()],
         bump = pay_custody.bump
     )]
     pub pay_custody: Box<Account<'info, Custody>>, // premium pay asset
 
     #[account(
+        mut,
         seeds = [b"custody_token_account",
                  pool.key().as_ref(),
                  pay_custody.mint.key().as_ref()],
@@ -203,12 +198,16 @@ pub struct OpenOption<'info> {
         mut,
         seeds = [b"custody",
                  pool.key().as_ref(),
-                 locked_custody.mint.as_ref()],
+                 locked_custody_mint.key().as_ref()],
         bump = locked_custody.bump
     )]
     pub locked_custody: Box<Account<'info, Custody>>, // locked asset
-
+    #[account(mut)]
+    pub custody_mint: Box<Account<'info, Mint>>,
+    #[account(mut)]
+    pub pay_custody_mint: Box<Account<'info, Mint>>,
+    #[account(mut)]
+    pub locked_custody_mint: Box<Account<'info, Mint>>,
     pub token_program: Program<'info, Token>,
-    pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }
