@@ -25,7 +25,7 @@ pub struct AddLiquidity<'info> {
         init_if_needed,
         payer= owner,
         associated_token::mint = lp_token_mint,
-        associated_token::authority = transfer_authority,
+        associated_token::authority = owner,
     )]
     pub lp_token_account: Box<Account<'info, TokenAccount>>,
 

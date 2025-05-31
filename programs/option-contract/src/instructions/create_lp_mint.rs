@@ -10,19 +10,8 @@ pub struct LpTokenMintData {
     pub uri: String, // Token URI
 }
 
-pub fn create_lp_mint(ctx: Context<CreatLpMint>, params: &LpTokenMintData) -> Result<()> {
-    let cpi_accounts = TokenMetadataInitialize {
-        token_program_id: ctx.accounts.token_program.to_account_info(),
-        mint: ctx.accounts.lp_token_mint.to_account_info(),
-        metadata: ctx.accounts.lp_token_mint.to_account_info(), // metadata account is the mint, since data is stored in mint
-        mint_authority: ctx.accounts.transfer_authority.to_account_info(),
-        update_authority: ctx.accounts.transfer_authority.to_account_info(),
-    };
-    let bump = ctx.accounts.contract.transfer_authority_bump;
-    let seeds = &[b"transfer_authority", &[bump][..]];
-    let signer = [&seeds[..]];
-    let cpi_ctx = CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), cpi_accounts, &signer);
-    token_metadata_initialize(cpi_ctx, params.name.clone(), params.symbol.clone(), params.uri.clone())?;
+pub fn create_lp_mint(_ctx: Context<CreatLpMint>, _params: &LpTokenMintData) -> Result<()> {
+     
     Ok(())
 }
 

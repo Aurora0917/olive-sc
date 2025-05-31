@@ -45,9 +45,9 @@ pub fn close_option(ctx: Context<CloseOption>, params: &CloseOptionParams) -> Re
             math::checked_sub(locked_custody.token_locked, option_detail.amount)?;
 
         // Return value to users, remove sale fee.
-        let amount = math::checked_div(math::checked_mul(option_detail.premium, 9)?, 10)?;
+        let amount = math::checked_div(math::checked_mul(option_detail.amount, 9)?, 10)?;
         require_gte!(
-            math::checked_div(pay_custody.token_owned, pay_custody.token_locked)?,
+            math::checked_sub(pay_custody.token_owned, pay_custody.token_locked)?,
             amount,
             OptionError::InvalidPoolBalanceError
         );
@@ -104,9 +104,9 @@ pub struct CloseOption<'info> {
     pub pool: Box<Account<'info, Pool>>,
 
     #[account(
-    seeds = [b"user", owner.key().as_ref()],
-    bump = user.bump,
-  )]
+        seeds = [b"user", owner.key().as_ref()],
+        bump,
+    )]
     pub user: Box<Account<'info, User>>,
 
     #[account(
@@ -119,10 +119,11 @@ pub struct CloseOption<'info> {
     pub custody: Box<Account<'info, Custody>>, // premium pay asset
 
     #[account(
+        mut,
       seeds = [b"option", owner.key().as_ref(), 
             params.option_index.to_le_bytes().as_ref(),
             pool.key().as_ref(), custody.key().as_ref(),],
-        bump = option_detail.bump
+        bump
     )]
     pub option_detail: Box<Account<'info, OptionDetail>>,
 
@@ -136,6 +137,7 @@ pub struct CloseOption<'info> {
     pub pay_custody: Box<Account<'info, Custody>>, // premium pay asset
 
     #[account(
+        mut,
         seeds = [b"custody_token_account",
                  pool.key().as_ref(),
                  pay_custody.mint.key().as_ref()],

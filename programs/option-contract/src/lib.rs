@@ -8,7 +8,7 @@ pub mod instructions;
 pub mod math;
 pub mod state;
 
-declare_id!("6PJkfHcuDPttDRBPUPwc7NryNW8vk3uL9ffbmUMGqqs1");
+declare_id!("8g657xNHbnchJuT4crLjVCG1bXS4uqPqA6ECaspjadmR");
 
 #[program]
 pub mod option_contract {

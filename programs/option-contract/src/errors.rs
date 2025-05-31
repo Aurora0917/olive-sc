@@ -9,6 +9,8 @@ pub enum OptionError {
     InvalidTimeError,
     InvalidPriceRequirementError,
     StalePriceError,
+    InvalidPayAmountError,
+    InsufficientFundsError,
 }
 
 #[error_code]

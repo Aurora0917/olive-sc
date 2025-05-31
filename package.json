@@ -2,10 +2,12 @@
   "license": "ISC",
   "scripts": {
     "lint:fix": "prettier */*.js \"*/**/*{.js,.ts}\" -w",
-    "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check"
+    "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check",
+    "deploy": "ts-node scripts/option-program.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.30.1",
+    "@solana/kit": "^2.1.1",
     "@solana/spl-token": "^0.4.12"
   },
   "devDependencies": {

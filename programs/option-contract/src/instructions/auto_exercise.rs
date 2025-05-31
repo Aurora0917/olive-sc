@@ -49,8 +49,7 @@ pub fn auto_exercise(
         // call option
         if oracle_price > option_detail.strike_price {
             // Calculate Sol Amount from Option Detail Value : call / covered sol
-            let amount = ((oracle_price - option_detail.strike_price) / option_detail.strike_price)
-                * (option_detail.amount as f64);
+            let amount = ((oracle_price - option_detail.strike_price) * (option_detail.quantity as f64)) / oracle_price;
 
             option_detail.claimed = amount as u64;
         } else {
@@ -61,7 +60,7 @@ pub fn auto_exercise(
         if option_detail.strike_price > oracle_price {
             // Calculate Profit amount with option detail values:  put / case-secured usdc
             let amount =
-                (option_detail.strike_price - oracle_price) * (option_detail.amount as f64);
+                (option_detail.strike_price - oracle_price) * (option_detail.quantity as f64);
 
             option_detail.claimed = amount as u64;
         } else {
