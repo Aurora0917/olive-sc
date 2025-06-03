@@ -58,7 +58,7 @@ impl Pool {
             Ok(0)
         } else {
             let ratio = math::checked_as_u64(math::checked_div(
-                token_price.get_asset_amount_usd(custody.token_owned, custody.decimals)? as u128,
+                math::checked_mul(token_price.get_asset_amount_usd(custody.token_owned, custody.decimals)? as u128, 100)?,
                 self.aum_usd,
             )?)?;
             Ok(ratio)
@@ -82,6 +82,10 @@ impl Pool {
         } else if amount_add > 0 {
             let added_aum_usd =
                 token_price.get_asset_amount_usd(amount_add, custody.decimals)? as u128;
+            msg!("amount_add: {}", amount_add);
+            msg!("custody.decimals: {}", custody.decimals);
+            msg!("token_price.price: {}", token_price.price);
+            msg!("added_aum_usd: {}", added_aum_usd);
 
             (
                 token_price.get_asset_amount_usd(
@@ -110,7 +114,10 @@ impl Pool {
             return Ok(0);
         }
 
-        let ratio = math::checked_as_u64(math::checked_div(new_token_aum_usd, new_pool_aum_usd)?)?;
+        msg!("new_token_aum_usd: {}", new_token_aum_usd);
+        msg!("new_pool_aum_usd: {}", new_pool_aum_usd);
+
+        let ratio = math::checked_as_u64(math::checked_div(new_token_aum_usd * 100, new_pool_aum_usd)?)?;
         Ok(ratio)
     }
 
@@ -140,7 +147,13 @@ impl Pool {
             let token_price = OraclePrice::new_from_oracle(&accounts[oracle_idx], curtime, false)?;
             let token_amount_usd =
                 token_price.get_asset_amount_usd(custody.token_owned, custody.decimals)?;
+            msg!("token_amount_usd: {}", token_amount_usd);
+            msg!("token_price: {}", token_price.price);
+            msg!("custody.token_owned: {}", custody.token_owned);
+            msg!("custody.decimals: {}", custody.decimals);
+            
             pool_amount_usd = math::checked_add(pool_amount_usd, token_amount_usd as u128)?;
+            msg!("pool_amount_usd: {}", pool_amount_usd);
         }
 
         Ok(pool_amount_usd)
@@ -204,6 +217,8 @@ impl Pool {
         let ratios = &self.ratios[token_id];
         let current_ratio = self.get_current_ratio(custody, token_price)?;
         let new_ratio = self.get_new_ratio(amount_add, amount_remove, custody, token_price)?;
+
+        msg!("current_ratio: {}", current_ratio);
 
         let improved = match new_ratio.cmp(&ratios.target) {
             Ordering::Less => {

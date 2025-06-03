@@ -78,7 +78,7 @@ pub struct AddPool<'info> {
     pub pool: Box<Account<'info, Pool>>,
 
     #[account(
-        init,
+        init_if_needed,
         payer = signer,
         mint::authority = transfer_authority,
         mint::freeze_authority = transfer_authority,

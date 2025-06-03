@@ -55,8 +55,7 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, params: &ExerciseOptionPara
             OptionError::InvalidPriceRequirementError
         );
         // Calculate Sol Amount from Option Detail Value : call / covered sol
-        let amount = ((oracle_price - option_detail.strike_price) / option_detail.strike_price)
-            * (option_detail.amount as f64);
+        let amount = (oracle_price - option_detail.strike_price) * (option_detail.quantity as f64) / oracle_price;
 
         // send profit to user
         contract.transfer_tokens(
@@ -76,7 +75,7 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, params: &ExerciseOptionPara
         );
 
         // Calculate Profit amount with option detail values:  put / case-secured usdc
-        let amount = (option_detail.strike_price - oracle_price) * (option_detail.amount as f64);
+        let amount = (option_detail.strike_price - oracle_price) * (option_detail.quantity as f64);
 
         // send profit to user
         contract.transfer_tokens(

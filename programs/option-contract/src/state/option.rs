@@ -3,10 +3,14 @@ use anchor_lang::prelude::*;
 #[account]
 pub struct OptionDetail {
     pub index: u64,
+    pub owner: Pubkey,
     pub amount: u64,
+    pub quantity: u64,
     pub strike_price: f64,
     pub period: u64,
     pub expired_date: u64,
+    pub purchase_date: u64,
+    pub option_type: u8, // 0: call, 1: put
 
     pub premium: u64,
     pub premium_asset: Pubkey, // pay_custody key
@@ -24,7 +28,7 @@ pub struct OptionDetail {
 }
 
 impl OptionDetail {
-    pub const LEN: usize = 8 * 10 + 1 + 1 + 32 * 4 + 8;
+    pub const LEN: usize = 8 * 12 + 1 * 3 + 32 * 5 + 8;
 
     pub fn normal_cdf(z: f64) -> f64 {
         let beta1 = -0.0004406;

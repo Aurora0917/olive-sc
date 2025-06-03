@@ -37,31 +37,10 @@ pub fn open_option(ctx: Context<OpenOption>, params: &OpenOptionParams) -> Resul
     // compute position price
     let curtime = contract.get_time()?;
 
-    let token_price = OraclePrice::new_from_oracle(custody_oracle_account, curtime, false)?;
-
-    let oracle_price = token_price.get_price();
-    let period_year = math::checked_as_f64(math::checked_float_div(params.period as f64, 365.0)?)?;
-
-    // Calculate Premium in usd using black scholes formula.
-    let premium = OptionDetail::black_scholes(
-        oracle_price,
-        params.strike,
-        period_year,
-        custody.key() == locked_custody.key(),
-    );
-
-    let pay_token_price = OraclePrice::new_from_oracle(pay_custody_oracle_account, curtime, false)?;
-
-    // Calculate Premium in pay_toke amount
-    let pay_amount = math::checked_as_u64(
-        math::checked_float_div(premium, pay_token_price.get_price())?
-            * math::checked_powi(10.0, pay_custody.decimals as i32)?,
-    )?;
-
     // Check if the user's token balance is enough to pay premium
     require_gte!(
         funding_account.amount,
-        pay_amount,
+        params.amount,
         OptionError::InvalidSignerBalanceError
     );
 
@@ -75,26 +54,69 @@ pub fn open_option(ctx: Context<OpenOption>, params: &OpenOptionParams) -> Resul
                 authority: owner.to_account_info(),
             },
         ),
-        pay_amount,
+        params.amount,
+    )?;
+    
+    let token_price = OraclePrice::new_from_oracle(custody_oracle_account, curtime, false)?;
+
+    let oracle_price = token_price.get_price();
+    let period_year = math::checked_as_f64(math::checked_float_div(params.period as f64, 365.0)?)?;
+
+    msg!("oracle_price: {}", oracle_price);
+    msg!("params.strike: {}", params.strike);
+    msg!("period_year: {}", period_year);
+    // Calculate Premium in usd using black scholes formula.
+    let premium = OptionDetail::black_scholes(
+        oracle_price,
+        params.strike,
+        period_year,
+        custody.key() == locked_custody.key(),
+    );
+    msg!("premium: {}", premium);
+
+    let pay_token_price = OraclePrice::new_from_oracle(pay_custody_oracle_account, curtime, false)?;
+
+    // Calculate Premium in pay_toke amount
+    let pay_amount = math::checked_as_u64(
+        math::checked_float_div(premium, pay_token_price.get_price())?
+            * math::checked_powi(10.0, pay_custody.decimals as i32)?,
     )?;
 
+    require_gt!(
+        pay_amount,
+        0,
+        OptionError::InvalidPayAmountError
+    );
+
     // Add premium to liquidity pool
-    pay_custody.token_owned = math::checked_add(pay_custody.token_owned, pay_amount)?;
+    pay_custody.token_owned = math::checked_add(pay_custody.token_owned, params.amount)?;
     option_detail.premium = pay_amount;
     option_detail.premium_asset = pay_custody.key();
 
+    let quantity = math::checked_div(params.amount, pay_amount)?;
+    msg!("quantity: {}", quantity);
+
+    let decimals_multiplier = math::checked_powi(10.0, pay_custody.decimals as i32)?;
+    locked_custody.token_locked = math::checked_add(
+        locked_custody.token_locked,
+        math::checked_as_u64(quantity as f64 * decimals_multiplier)?
+    )?;
+
     require_gte!(
-        locked_custody.token_owned,
-        math::checked_add(locked_custody.token_locked, params.amount)?,
+        pay_custody.token_owned,
+        locked_custody.token_locked,
         OptionError::InvalidPoolBalanceError
     );
-    locked_custody.token_locked += params.amount as u64;
 
     // store option data
     option_detail.amount = params.amount;
+    option_detail.quantity = quantity;
+    option_detail.owner = owner.key();
     option_detail.index = option_index;
     option_detail.period = params.period;
     option_detail.expired_date = params.expired_time as u64;
+    option_detail.purchase_date = curtime as u64;
+    option_detail.option_type = if custody.key() == locked_custody.key() { 0 } else { 1 };
     option_detail.strike_price = params.strike;
     option_detail.valid = true;
     option_detail.locked_asset = locked_custody.key();
