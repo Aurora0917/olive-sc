@@ -59,7 +59,7 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, params: &ExerciseOptionPara
 
         // send profit to user
         contract.transfer_tokens(
-            locked_oracle.to_account_info(),
+            locked_custody.to_account_info(),
             funding_account.to_account_info(),
             transfer_authority.to_account_info(),
             token_program.to_account_info(),
@@ -79,7 +79,7 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, params: &ExerciseOptionPara
 
         // send profit to user
         contract.transfer_tokens(
-            locked_oracle.to_account_info(),
+            locked_custody.to_account_info(),
             funding_account.to_account_info(),
             transfer_authority.to_account_info(),
             token_program.to_account_info(),
