@@ -30,7 +30,7 @@ pub fn auto_exercise(
 
     // Check if option is available to exercise, before expired time.
     require_gt!(
-        current_timestamp as u64,
+        current_timestamp as i64,
         option_detail.expired_date,
         OptionError::InvalidTimeError
     );

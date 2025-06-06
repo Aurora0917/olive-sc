@@ -149,6 +149,12 @@ pub fn remove_liquidity<'info>(
     let transfer_amount = math::checked_sub(remove_amount, fee_amount)?;
     msg!("Amount out: {}", transfer_amount);
 
+    require_gte!(
+        transfer_amount,
+        params.min_amount_out,
+        ContractError::InsufficientAmountReturned
+    );
+
     // check pool constraints
     msg!("Check pool constraints");
     let withdrawal_amount = math::checked_add(transfer_amount, fee_amount)?;

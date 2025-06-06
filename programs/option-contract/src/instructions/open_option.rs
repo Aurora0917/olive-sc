@@ -114,7 +114,7 @@ pub fn open_option(ctx: Context<OpenOption>, params: &OpenOptionParams) -> Resul
     option_detail.owner = owner.key();
     option_detail.index = option_index;
     option_detail.period = params.period;
-    option_detail.expired_date = params.expired_time as u64;
+    option_detail.expired_date = params.expired_time as i64;
     option_detail.purchase_date = curtime as u64;
     option_detail.option_type = if custody.key() == locked_custody.key() { 0 } else { 1 };
     option_detail.strike_price = params.strike;

@@ -8,7 +8,7 @@ pub struct OptionDetail {
     pub quantity: u64,
     pub strike_price: f64,
     pub period: u64,
-    pub expired_date: u64,
+    pub expired_date: i64,
     pub purchase_date: u64,
     pub option_type: u8, // 0: call, 1: put
 

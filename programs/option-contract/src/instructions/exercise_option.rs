@@ -33,7 +33,7 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, params: &ExerciseOptionPara
     // Check if option is available to exercise, before expired time.
     require_gt!(
         option_detail.expired_date,
-        current_timestamp as u64,
+        current_timestamp as i64,
         OptionError::InvalidTimeError
     );
 

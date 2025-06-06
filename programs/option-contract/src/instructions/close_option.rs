@@ -1,7 +1,7 @@
 use crate::{
     errors::OptionError,
     math,
-    state::{Contract, Custody, OptionDetail, Pool, User},
+    state::{Contract, Custody, OptionDetail, OraclePrice, Pool, User},
 };
 use anchor_lang::prelude::*;
 use anchor_spl::{
@@ -23,47 +23,92 @@ pub fn close_option(ctx: Context<CloseOption>, params: &CloseOptionParams) -> Re
     let transfer_authority = &ctx.accounts.transfer_authority;
 
     let locked_custody = &mut ctx.accounts.locked_custody;
-
     let pay_custody = &mut ctx.accounts.pay_custody;
     let pay_custody_token_account = &ctx.accounts.pay_custody_token_account;
-
     let funding_account = &ctx.accounts.funding_account;
+    let pay_custody_oracle_account = &ctx.accounts.pay_custody_oracle_account;
+    let custody_oracle_account = &ctx.accounts.custody_oracle_account;
 
     require_keys_eq!(pay_custody.key(), option_detail.premium_asset);
     require_gte!(user.option_index, params.option_index);
 
-    // If that option wasn't exercised
-    if option_detail.valid == true {
-        // If that option is call option, restore WSOL amount from locked assets in liquidty pool
+    // Only if option is valid and not exercised
+    if option_detail.valid {
+        // Get current time and check that option has not expired
+        let current_time: i64 = contract.get_time()? as i64;
+        if current_time >= option_detail.expired_date {
+        // Convert your custom error into a ProgramError and return it:
+            return Err(OptionError::InvalidTimeError.into());
+        }
+
+        // Reduce locked custody
         require_gte!(
             locked_custody.token_locked,
             option_detail.amount,
             OptionError::InvalidLockedBalanceError
         );
+        locked_custody.token_locked = math::checked_sub(locked_custody.token_locked, option_detail.amount)?;
 
-        locked_custody.token_locked =
-            math::checked_sub(locked_custody.token_locked, option_detail.amount)?;
+        // Time decay logic
+        let remaining_seconds = option_detail.expired_date.saturating_sub(current_time as i64);
+        let remaining_days = remaining_seconds as f64 / 86400.0;
+        let remaining_years = remaining_days / 365.0;
 
-        // Return value to users, remove sale fee.
-        let amount = math::checked_div(math::checked_mul(option_detail.amount, 9)?, 10)?;
+        // Oracle price of underlying asset (e.g. SOL)
+        let underlying_price = OraclePrice::new_from_oracle(
+            custody_oracle_account,
+            current_time,
+            false,
+        )?.get_price();
+
+        // Recalculate premium using Black-Scholes
+        let bs_price = OptionDetail::black_scholes(
+            underlying_price,
+            option_detail.strike_price,
+            remaining_years,
+            option_detail.option_type == 0, // 0 = call, 1 = put
+        );
+
+        // Convert premium to token amount
+        let pay_token_price = OraclePrice::new_from_oracle(
+            pay_custody_oracle_account,
+            current_time,
+            false,
+        )?.get_price();
+
+        let token_decimals = pay_custody.decimals;
+        let pay_amount = math::checked_as_u64(
+            math::checked_float_div(bs_price, pay_token_price)?
+                * math::checked_powi(10.0, token_decimals as i32)?
+        )?;
+
+        require_gt!(pay_amount, 0, OptionError::InvalidPayAmountError);
+
+        // Apply 10% fee
+        let refund_amount = math::checked_div(math::checked_mul(pay_amount, 9)?, 10)?;
+
+        // Check pool balance
         require_gte!(
             math::checked_sub(pay_custody.token_owned, pay_custody.token_locked)?,
-            amount,
+            refund_amount,
             OptionError::InvalidPoolBalanceError
         );
-        pay_custody.token_owned = math::checked_sub(pay_custody.token_owned, amount)?;
 
+        // Update pool balance
+        pay_custody.token_owned = math::checked_sub(pay_custody.token_owned, refund_amount)?;
+
+        // Transfer refund to user
         contract.transfer_tokens(
             pay_custody_token_account.to_account_info(),
             funding_account.to_account_info(),
             transfer_authority.to_account_info(),
             token_program.to_account_info(),
-            amount,
+            refund_amount,
         )?;
 
-        // Disable this option to prevent exercise
+        // Invalidate option
         option_detail.valid = false;
-        option_detail.bought_back = contract.get_time()? as u64;
+        option_detail.bought_back = current_time as u64;
     }
 
     Ok(())
@@ -116,16 +161,7 @@ pub struct CloseOption<'info> {
                  custody_mint.key().as_ref()],
         bump = custody.bump
     )]
-    pub custody: Box<Account<'info, Custody>>, // premium pay asset
-
-    #[account(
-        mut,
-      seeds = [b"option", owner.key().as_ref(), 
-            params.option_index.to_le_bytes().as_ref(),
-            pool.key().as_ref(), custody.key().as_ref(),],
-        bump
-    )]
-    pub option_detail: Box<Account<'info, OptionDetail>>,
+    pub custody: Box<Account<'info, Custody>>, // underlying price asset
 
     #[account(
         mut,
@@ -134,7 +170,7 @@ pub struct CloseOption<'info> {
                  pay_custody_mint.key().as_ref()],
         bump = pay_custody.bump
     )]
-    pub pay_custody: Box<Account<'info, Custody>>, // premium pay asset
+    pub pay_custody: Box<Account<'info, Custody>>, // premium payment asset
 
     #[account(
         mut,
@@ -153,6 +189,24 @@ pub struct CloseOption<'info> {
         bump = locked_custody.bump
     )]
     pub locked_custody: Box<Account<'info, Custody>>, // locked asset
+
+    #[account(
+        mut,
+        seeds = [b"option", owner.key().as_ref(),
+            params.option_index.to_le_bytes().as_ref(),
+            pool.key().as_ref(), custody.key().as_ref()],
+        bump
+    )]
+    pub option_detail: Box<Account<'info, OptionDetail>>,
+
+    /// CHECK: oracle for underlying asset
+    #[account(constraint = custody_oracle_account.key() == custody.oracle)]
+    pub custody_oracle_account: AccountInfo<'info>,
+
+    /// CHECK: oracle for payment asset
+    #[account(constraint = pay_custody_oracle_account.key() == pay_custody.oracle)]
+    pub pay_custody_oracle_account: AccountInfo<'info>,
+
     #[account(mut)]
     pub custody_mint: Box<Account<'info, Mint>>,
     #[account(mut)]
