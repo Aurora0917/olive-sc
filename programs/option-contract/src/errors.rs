@@ -7,9 +7,13 @@ pub enum OptionError {
     InvalidSignerBalanceError,
     InvalidOptionIndexError,
     InvalidTimeError,
+    InvalidMintError,
     InvalidPriceRequirementError,
     StalePriceError,
     InvalidPayAmountError,
+    InvalidOwner,
+    OptionNotValid,
+    OptionAlreadyExercised,
     InsufficientFundsError,
 }
 
@@ -35,6 +39,12 @@ pub enum MultiSigError {
 pub enum MathError {
     #[msg("Overflow in arithmetic operation")]
     OverflowMathError,
+
+    #[msg("Invalid mint address")]
+    InvalidMint,
+    
+    #[msg("Invalid owner")]
+    InvalidOwner,
 }
 
 

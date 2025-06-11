@@ -24,9 +24,32 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, params: &ExerciseOptionPara
     let transfer_authority = &mut ctx.accounts.transfer_authority;
     let custody: &mut Box<Account<'_, Custody>> = &mut ctx.accounts.custody;
     let locked_custody = &mut ctx.accounts.locked_custody;
+    let locked_custody_token_account = &mut ctx.accounts.locked_custody_token_account;
     let locked_oracle = &ctx.accounts.locked_oracle;
 
+    // ✅ CRITICAL VALIDATION CHECKS - Add these at the beginning
     require_gte!(user.option_index, params.option_index);
+    
+    // ✅ Prevent re-exercising the same option
+    require_eq!(
+        option_detail.exercised,
+        0,
+        OptionError::OptionAlreadyExercised
+    );
+    
+    // ✅ Ensure option is still valid
+    require!(
+        option_detail.valid,
+        OptionError::OptionNotValid
+    );
+    
+    // ✅ Verify option belongs to caller
+    require_eq!(
+        option_detail.owner,
+        ctx.accounts.owner.key(),
+        OptionError::InvalidOwner
+    );
+
     // Current Unix timestamp
     let current_timestamp = contract.get_time()?;
 
@@ -57,9 +80,9 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, params: &ExerciseOptionPara
         // Calculate Sol Amount from Option Detail Value : call / covered sol
         let amount = (oracle_price - option_detail.strike_price) * (option_detail.quantity as f64) / oracle_price;
 
-        // send profit to user
+        // ✅ FIXED: Use the custody token account instead of custody metadata account
         contract.transfer_tokens(
-            locked_custody.to_account_info(),
+            locked_custody_token_account.to_account_info(),
             funding_account.to_account_info(),
             transfer_authority.to_account_info(),
             token_program.to_account_info(),
@@ -77,9 +100,9 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, params: &ExerciseOptionPara
         // Calculate Profit amount with option detail values:  put / case-secured usdc
         let amount = (option_detail.strike_price - oracle_price) * (option_detail.quantity as f64);
 
-        // send profit to user
+        // ✅ FIXED: Use the custody token account instead of custody metadata account
         contract.transfer_tokens(
-            locked_custody.to_account_info(),
+            locked_custody_token_account.to_account_info(),
             funding_account.to_account_info(),
             transfer_authority.to_account_info(),
             token_program.to_account_info(),
@@ -89,11 +112,13 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, params: &ExerciseOptionPara
         option_detail.profit = amount as u64;
     }
 
+    // ✅ Mark option as exercised and invalid (these changes will now be saved!)
     option_detail.exercised = current_timestamp as u64;
     option_detail.valid = false;
 
+    // ✅ Update locked custody balance
     locked_custody.token_locked =
-    math::checked_sub(locked_custody.token_locked, option_detail.amount)?;
+        math::checked_sub(locked_custody.token_locked, option_detail.amount)?;
 
     Ok(())
 }
@@ -106,7 +131,6 @@ pub struct ExerciseOption<'info> {
 
     #[account(
         mut,
-        constraint = funding_account.mint == locked_custody.mint,
         has_one = owner
     )]
     pub funding_account: Box<Account<'info, TokenAccount>>,
@@ -126,12 +150,19 @@ pub struct ExerciseOption<'info> {
 
     #[account(
         mut,
-        seeds = [b"pool",
-                 params.pool_name.as_bytes()],
+        seeds = [b"pool", params.pool_name.as_bytes()],
         bump = pool.bump
     )]
     pub pool: Box<Account<'info, Pool>>,
 
+    // ✅ CRITICAL FIX: MOVE ALL MINTS TO TOP BEFORE DEPENDENT ACCOUNTS
+    #[account(mut)]
+    pub custody_mint: Box<Account<'info, Mint>>,
+    
+    #[account(mut)]
+    pub locked_custody_mint: Box<Account<'info, Mint>>,
+
+    // ✅ NOW these accounts can derive correctly with mints available
     #[account(
         mut,
         seeds = [b"custody",
@@ -142,15 +173,17 @@ pub struct ExerciseOption<'info> {
     pub custody: Box<Account<'info, Custody>>, // Target price asset
 
     #[account(
-    seeds = [b"user", owner.key().as_ref()],
-    bump,
-  )]
+        seeds = [b"user", owner.key().as_ref()],
+        bump,
+    )]
     pub user: Box<Account<'info, User>>,
 
+    // ✅ CRITICAL FIX: Add `mut` to option_detail!
     #[account(
-      seeds = [b"option", owner.key().as_ref(), 
-            params.option_index.to_le_bytes().as_ref(),
-            pool.key().as_ref(), custody.key().as_ref(),],
+        mut,  // ✅ THIS WAS MISSING! Without this, changes aren't saved!
+        seeds = [b"option", owner.key().as_ref(), 
+                params.option_index.to_le_bytes().as_ref(),
+                pool.key().as_ref(), custody.key().as_ref()],
         bump
     )]
     pub option_detail: Box<Account<'info, OptionDetail>>,
@@ -160,19 +193,28 @@ pub struct ExerciseOption<'info> {
         seeds = [b"custody",
                  pool.key().as_ref(),
                  locked_custody_mint.key().as_ref()],
-        bump = locked_custody.bump
+        bump = locked_custody.bump,
+        constraint = locked_custody.mint == locked_custody_mint.key() @ OptionError::InvalidMintError
     )]
-    pub locked_custody: Box<Account<'info, Custody>>, // locked asset
+    pub locked_custody: Box<Account<'info, Custody>>,
+
+    // ✅ Token account can now be derived properly with mint available
+    #[account(
+        mut,
+        seeds = [b"custody_token_account",
+                 pool.key().as_ref(),
+                 locked_custody_mint.key().as_ref()],
+        bump,
+        constraint = locked_custody_token_account.mint == locked_custody_mint.key() @ OptionError::InvalidMintError,
+    )]
+    pub locked_custody_token_account: Box<Account<'info, TokenAccount>>,
 
     /// CHECK: oracle account for the position token
     #[account(
         constraint = locked_oracle.key() == locked_custody.oracle
     )]
     pub locked_oracle: AccountInfo<'info>,
-    #[account(mut)]
-    pub custody_mint: Box<Account<'info, Mint>>,
-    #[account(mut)]
-    pub locked_custody_mint: Box<Account<'info, Mint>>,
+
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,

@@ -15,6 +15,7 @@ import { createKeyPairSignerFromBytes } from "@solana/kit";
 import {
   createMint,
   mintTo,
+  transfer,
   getOrCreateAssociatedTokenAccount,
   getAssociatedTokenAddressSync,
   TOKEN_PROGRAM_ID,
@@ -22,38 +23,141 @@ import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
 
+import { createUmi } from '@metaplex-foundation/umi-bundle-defaults';
+import {
+  createSignerFromKeypair,
+  signerIdentity,
+  generateSigner,
+  percentAmount
+} from '@metaplex-foundation/umi';
+import {
+  createAndMint,
+  TokenStandard,
+  mplTokenMetadata
+} from '@metaplex-foundation/mpl-token-metadata';
+
 let contractData;
-let USDCMint = new PublicKey("3d79oe7AKxxHfLz11BXAnWqBX72rubLiQppUNoKGhMPk");
-let WSOLMint = new PublicKey("349kUpx5gmhFhy3bmYFW6SqNteDyc4uUt4Do5nSRM5B7");
+let USDCMint = new PublicKey("Fe7yM1wqx5ySZmSHJjNzkLuvBCU8BEnYpmxcpGwwBkZq");
+let WSOLMint = new PublicKey("6fiDYq4uZgQQNUZVaBBcwu9jAUTWWBb7U8nmxt6BCaHY");
+// let USDCMint = new PublicKey("2hPbZQe6G676DkWjZHpyoK1rzMtAwp8fFxAMsph2kCcV");
+// let WSOLMint = new PublicKey("A2QZdZQKXDNk67Xwp3dpmE3nTXFQQhuULAL1usqtaM5d");
 const WSOL_ORACLE = new PublicKey(
-  "J83w4HKfqxwcq3BEMMkPFSppX3gqekLyLJBexebFVkix"
+  "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE"
 );
 const USDC_ORACLE = new PublicKey(
-  "5SSkXsEKQepHHAewytPVwdej4epN1nxgLVM84L4KXgy7"
+  "Dpw1EAVrSB1ibxiDQyTAW6Zip3J4Btk2x4SgApQCeFbX"
 );
 
-const USDC_amount = 100_000_000_000_000;
-const WSOL_amount = 100_000_000_000_000_000;
+const USDC_amount = 200_000_000_000_000;
+const WSOL_amount = 200_000_000_000_000_000;
 const walletPath = path.resolve(os.homedir(), ".config/solana/id.json");
 const secret = JSON.parse(fs.readFileSync(walletPath, "utf8"));
 const wallet = new anchor.Wallet(Keypair.fromSecretKey(new Uint8Array(secret)));
 
-// const poolName = "SOL-USDC-LP-TEST-2";
+// const poolName = "SOL-USDC-LP-V-2";
 let userWallet = Keypair.fromSecretKey(new Uint8Array(secret));
 
 // Configure the client using the cluster from Anchor.toml
 const provider = new anchor.AnchorProvider(
   new anchor.web3.Connection("https://api.devnet.solana.com"),
+  // new anchor.web3.Connection("http://127.0.0.1:8899"),
   wallet,
   anchor.AnchorProvider.defaultOptions()
 );
 anchor.setProvider(provider);
 const program = anchor.workspace.OptionContract as Program<OptionContract>;
 
+const umi = createUmi(provider.connection.rpcEndpoint).use(mplTokenMetadata());
+
+// Convert your wallet to Umi signer format
+const umiKeypair = umi.eddsa.createKeypairFromSecretKey(wallet.payer.secretKey);
+const umiSigner = createSignerFromKeypair(umi, umiKeypair);
+umi.use(signerIdentity(umiSigner));
+
 const [contract] = PublicKey.findProgramAddressSync(
   [Buffer.from("contract")],
   program.programId
 );
+
+const createMintsAlternative = async () => {
+  console.log("🪙 Creating fungible tokens with Metaplex Umi...");
+
+  try {
+    // === CREATE USDC TOKEN ===
+    console.log("💵 Creating USDC token...");
+
+    const usdcMint = generateSigner(umi);
+
+    await createAndMint(umi, {
+      mint: usdcMint,
+      authority: umi.identity,
+      name: "Test USD Coin",
+      symbol: "USDC",
+      uri: "https://gateway.pinata.cloud/ipfs/bafkreibpfwakakaxznm2o6ekbmvsmdkzjv7riclnokwczmftjl6g4bdcn4",
+      sellerFeeBasisPoints: percentAmount(0),
+      decimals: 6,
+      amount: 200_000_000_000_000, // 200M USDC with 6 decimals
+      tokenOwner: umi.identity.publicKey,
+      tokenStandard: TokenStandard.Fungible,
+    }).sendAndConfirm(umi);
+
+    USDCMint = new PublicKey(usdcMint.publicKey);
+    console.log("✅ USDC Token created:", USDCMint.toBase58());
+
+    // === CREATE WSOL TOKEN ===
+    console.log("💎 Creating WSOL token...");
+
+    const wsolMint = generateSigner(umi);
+
+    await createAndMint(umi, {
+      mint: wsolMint,
+      authority: umi.identity,
+      name: "Test Wrapped SOL",
+      symbol: "WSOL",
+      uri: "https://gateway.pinata.cloud/ipfs/bafkreiejkfbxqfenyaqfrw2wlbbtin7j4iyiuw3antgj2zmesdghefuwza",
+      sellerFeeBasisPoints: percentAmount(0),
+      decimals: 9,
+      amount: 200_000_000_000_000_000, // 200M WSOL with 9 decimals
+      tokenOwner: umi.identity.publicKey,
+      tokenStandard: TokenStandard.Fungible,
+    }).sendAndConfirm(umi);
+
+    WSOLMint = new PublicKey(wsolMint.publicKey);
+    console.log("✅ WSOL Token created:", WSOLMint.toBase58());
+
+    console.log("🎉 All tokens created successfully with Umi!");
+
+  } catch (error) {
+    console.error("❌ Error creating tokens with Umi:", error);
+
+    // Fallback to basic token creation
+    console.log("🔄 Falling back to basic token creation...");
+
+    USDCMint = await createMint(
+      provider.connection,
+      wallet.payer,
+      wallet.publicKey,
+      wallet.publicKey,
+      6, // USDC decimals
+      undefined,
+      { commitment: "finalized" },
+      TOKEN_PROGRAM_ID
+    );
+    console.log("📦 Fallback USDC Mint:", USDCMint.toBase58());
+
+    WSOLMint = await createMint(
+      provider.connection,
+      wallet.payer,
+      wallet.publicKey,
+      wallet.publicKey,
+      9, // WSOL decimals
+      undefined,
+      { commitment: "finalized" },
+      TOKEN_PROGRAM_ID
+    );
+    console.log("📦 Fallback WSOL Mint:", WSOLMint.toBase58());
+  }
+};
 
 const createMints = async () => {
   // Initial setup - mint tokens, set up accounts
@@ -334,7 +438,23 @@ const addCustodies = async (_poolName: string) => {
 };
 
 const addUSDCLiquidity = async (_poolName: string) => {
-  let newPool: PublicKey = contractData.pools.pop();
+  let newPool: PublicKey;
+
+  for (const poolPubkey of contractData.pools) {
+    try {
+      // Fetch pool data to check its name
+      const poolData = await program.account.pool.fetch(poolPubkey);
+
+      // Assuming pool has a name field
+      if (poolData.name === _poolName) {
+        newPool = poolPubkey;
+        break;
+      }
+    } catch (error) {
+      console.log(`Error fetching pool ${poolPubkey.toBase58()}:`, error);
+      continue;
+    }
+  }
   let poolData = await program.account.pool.fetch(newPool);
   console.log("poolData", poolData);
 
@@ -376,7 +496,7 @@ const addUSDCLiquidity = async (_poolName: string) => {
 
   const addLiquidity_USDC_Tx = await program.methods
     .addLiquidity({
-      amountIn: new anchor.BN(1_000_000_000_000_000),
+      amountIn: new anchor.BN(1_000_000_000_000),
       minLpAmountOut: new anchor.BN(100_000),
       poolName: _poolName,
     })
@@ -393,10 +513,29 @@ const addUSDCLiquidity = async (_poolName: string) => {
     .rpc();
 
   console.log("addLiquidity_USDC_Tx", addLiquidity_USDC_Tx);
+  const tokenBalance = await provider.connection.getTokenAccountBalance(lpTokenAccount);
+  console.log("LP Token Balance:", tokenBalance.value.uiAmount);
+  console.log("LP Token Mint Address:", lpTokenMint.toBase58());
 };
 
 const addWSOLLiquidity = async (_poolName: string) => {
-  let newPool: PublicKey = contractData.pools.pop();
+  let newPool: PublicKey;
+
+  for (const poolPubkey of contractData.pools) {
+    try {
+      // Fetch pool data to check its name
+      const poolData = await program.account.pool.fetch(poolPubkey);
+
+      // Assuming pool has a name field
+      if (poolData.name === _poolName) {
+        newPool = poolPubkey;
+        break;
+      }
+    } catch (error) {
+      console.log(`Error fetching pool ${poolPubkey.toBase58()}:`, error);
+      continue;
+    }
+  }
   let poolData = await program.account.pool.fetch(newPool);
   console.log("poolData:", poolData);
 
@@ -450,6 +589,112 @@ const addWSOLLiquidity = async (_poolName: string) => {
     .signers([wallet.payer])
     .rpc();
   console.log("addLiquidity_WSOL_Tx", addLiquidity_WSOL_Tx);
+};
+
+const openOption_Call_USDC = async (
+  _poolName: string,
+  _index: number,
+  _amount: number,
+  _strike: number,
+  _period: number
+) => {
+  let newPool: PublicKey;
+
+  for (const poolPubkey of contractData.pools) {
+    try {
+      // Fetch pool data to check its name
+      const poolData = await program.account.pool.fetch(poolPubkey);
+
+      // Assuming pool has a name field
+      if (poolData.name === _poolName) {
+        newPool = poolPubkey;
+        break;
+      }
+    } catch (error) {
+      console.log(`Error fetching pool ${poolPubkey.toBase58()}:`, error);
+      continue;
+    }
+  }
+  let poolData = await program.account.pool.fetch(newPool);
+  console.log("poolData", poolData);
+  // Open Option Call
+  const fundingAccount = getAssociatedTokenAddressSync(
+    USDCMint,
+    wallet.publicKey
+  );
+  const [lpTokenMint] = PublicKey.findProgramAddressSync(
+    [Buffer.from("lp_token_mint"), Buffer.from(_poolName)],
+    program.programId
+  );
+  const [poolPDA] = PublicKey.findProgramAddressSync(
+    [Buffer.from("pool"), Buffer.from(_poolName)],
+    program.programId
+  );
+  const [custodyTokenAccount] = PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("custody_token_account"),
+      newPool.toBuffer(),
+      USDCMint.toBuffer(),
+    ],
+    program.programId
+  );
+  const lpTokenAccount = getAssociatedTokenAddressSync(
+    lpTokenMint,
+    wallet.publicKey
+  );
+  let usdcCustody: PublicKey;
+  let wsolCustody: PublicKey;
+  for await (let custody of poolData.custodies) {
+    let c = await program.account.custody.fetch(new PublicKey(custody));
+    let mint = c.mint;
+    if (mint.toBase58() == USDCMint?.toBase58()) {
+      usdcCustody = custody;
+    } else {
+      wsolCustody = custody;
+    }
+  }
+  const [optionDetail] = PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("option"),
+      wallet.publicKey.toBuffer(),
+      new anchor.BN(_index).toArrayLike(Buffer, "le", 8),
+      newPool.toBuffer(),
+      wsolCustody.toBuffer(),
+    ],
+    program.programId
+  );
+  console.log("optionDetail", optionDetail, "wsolCustody", wsolCustody);
+
+  const usdcCustodyData = await program.account.custody.fetch(usdcCustody);
+
+
+  const tx = await program.methods
+    .openOption({
+      amount: new anchor.BN(_amount),
+      strike: _strike,
+      expiredTime: new anchor.BN(
+        Math.floor(Date.now() / 1000) + 86400 * _period
+      ),
+      period: new anchor.BN(_period),
+      poolName: _poolName,
+    })
+    .accountsPartial({
+      owner: wallet.publicKey,
+      fundingAccount: fundingAccount,
+      custodyMint: WSOLMint,
+      payCustodyMint: USDCMint,
+      custodyOracleAccount: WSOL_ORACLE,
+      payCustodyOracleAccount: USDC_ORACLE,
+      lockedCustodyMint: WSOLMint,
+      optionDetail: optionDetail,
+      pool: poolPDA,
+      custody: wsolCustody,
+      payCustody: usdcCustody,
+    })
+    .signers([wallet.payer])
+    .rpc(); // {skipPreflight: true}
+
+  console.log("openOptionTx:", tx);
 };
 
 const openOption_Call = async (
@@ -634,6 +879,171 @@ const closeOption_Call = async (_poolName: string, _index: number) => {
   console.log("closeOptionTx:", tx);
 };
 
+const exerciseOption_Call = async (_poolName: string, _index: number) => {
+  // Find pool by name
+  let newPool: PublicKey;
+  for (const poolPubkey of contractData.pools) {
+    try {
+      const poolData = await program.account.pool.fetch(poolPubkey);
+      if (poolData.name === _poolName) {
+        newPool = poolPubkey;
+        break;
+      }
+    } catch (error) {
+      console.log(`Error fetching pool ${poolPubkey.toBase58()}:`, error);
+      continue;
+    }
+  }
+
+  if (!newPool) {
+    console.log("❌ Pool not found:", _poolName);
+    return;
+  }
+
+  const poolData = await program.account.pool.fetch(newPool);
+  console.log("Pool found:", poolData.name);
+
+  // Find WSOL custody from pool's custodies
+  let wsolCustody: PublicKey;
+  for (const custody of poolData.custodies) {
+    const custodyData = await program.account.custody.fetch(new PublicKey(custody));
+    if (custodyData.mint.equals(WSOLMint)) {
+      wsolCustody = new PublicKey(custody);
+      break;
+    }
+  }
+
+  let usdcCustody: PublicKey;
+  for (const custody of poolData.custodies) {
+    const custodyData = await program.account.custody.fetch(new PublicKey(custody));
+    if (custodyData.mint.equals(USDCMint)) {
+      usdcCustody = new PublicKey(custody);
+      break;
+    }
+  }
+
+  if (!wsolCustody) {
+    console.log("❌ WSOL custody not found in pool");
+    return;
+  }
+
+  // Derive all required accounts
+  const [poolPDA] = PublicKey.findProgramAddressSync(
+    [Buffer.from("pool"), Buffer.from(_poolName)],
+    program.programId
+  );
+
+  const fundingAccount = getAssociatedTokenAddressSync(USDCMint, wallet.publicKey);
+
+  const [transferAuthority] = PublicKey.findProgramAddressSync(
+    [Buffer.from("transfer_authority")],
+    program.programId
+  );
+
+  const [user] = PublicKey.findProgramAddressSync(
+    [Buffer.from("user"), wallet.publicKey.toBuffer()],
+    program.programId
+  );
+
+  // ✅ CRITICAL: Derive locked custody PDA (not mint!)
+  const [lockedCustody] = PublicKey.findProgramAddressSync(
+    [Buffer.from("custody"), newPool.toBuffer(), USDCMint.toBuffer()],
+    program.programId
+  );
+
+  const [lockedCustodyTokenAccount] = PublicKey.findProgramAddressSync(
+    [Buffer.from("custody_token_account"), newPool.toBuffer(), USDCMint.toBuffer()],
+    program.programId
+  );
+
+  const [optionDetail] = PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("option"),
+      wallet.publicKey.toBuffer(),
+      new anchor.BN(_index).toArrayLike(Buffer, "le", 8),
+      newPool.toBuffer(),
+      wsolCustody.toBuffer(),
+    ],
+    program.programId
+  );
+
+  console.log("🚀 Exercising option...");
+  console.log("  Pool:", _poolName);
+  console.log("  Index:", _index);
+  console.log("  Funding Account:", fundingAccount.toBase58());
+  console.log("  WSOL Custody:", wsolCustody.toBase58());
+  console.log("  Locked Custody:", lockedCustody.toBase58());
+
+  try {
+    const tx = await program.methods
+      .exerciseOption({
+        optionIndex: new anchor.BN(_index),
+        poolName: _poolName,
+      })
+      .accountsPartial({
+        owner: wallet.publicKey,
+        fundingAccount: fundingAccount,
+        transferAuthority: transferAuthority,
+        contract: contract,
+        pool: poolPDA,
+        
+        // ✅ ACCOUNT ORDER MATCHES RUST STRUCT
+        custodyMint: WSOLMint,              // Mint first
+        lockedCustodyMint: USDCMint,        // Mint first
+        custody: wsolCustody,               // Then dependent accounts
+        user: user,
+        optionDetail: optionDetail,
+        lockedCustody: lockedCustody,       // ✅ FIXED: Use custody PDA, not mint!
+        lockedCustodyTokenAccount: lockedCustodyTokenAccount,
+        lockedOracle: USDC_ORACLE,
+      })
+      .signers([wallet.payer])
+      .rpc();
+
+    console.log("✅ Exercise option successful:", tx);
+    return tx;
+    
+  } catch (error) {
+    console.log("❌ Transaction failed:", error.message);
+    if (error.logs) {
+      console.log("Logs:", error.logs);
+    }
+    throw error;
+  }
+};
+
+// ============================================================================
+// 🎯 KEY FIXES MADE:
+// ============================================================================
+
+/*
+❌ BEFORE (Your broken code):
+.accounts({
+  // ...
+  lockedCustody: WSOLMint,           // ❌ WRONG! This is a mint, not custody PDA
+  lockedCustodyMint: WSOLMint,       // ✅ Correct
+  // ...
+})
+
+✅ AFTER (Fixed code):
+.accounts({
+  // ...
+  lockedCustody: lockedCustody,      // ✅ CORRECT! This is the custody PDA
+  lockedCustodyMint: WSOLMint,       // ✅ Correct
+  // ...
+})
+
+🔍 EXPLANATION:
+- lockedCustody expects: Box<Account<'info, Custody>> (custody PDA owned by your program)
+- You were passing: WSOLMint (mint account owned by Token Program)
+- Result: AccountOwnedByWrongProgram error
+
+✅ SOLUTION:
+- Pass the derived lockedCustody PDA instead of the mint
+- Account order matches your fixed Rust struct
+- All constraints should now validate correctly
+*/
+
 const removeLiquidity = async (
   lp_amount: number,
   min_amount_out: number,
@@ -719,19 +1129,137 @@ const removeLiquidity = async (
   console.log("removeLiquidityTx:", tx);
 };
 
+const createFundedTokenAccountsViaTransfer = async (targetWalletAddress: string) => {
+  const targetWallet = new PublicKey(targetWalletAddress);
+  console.log("🎯 Creating funded token accounts for:", targetWallet.toBase58());
+
+  // Token amounts: 50M each
+  const USDC_AMOUNT = 50_000_000_000_000;  // 50M USDC (6 decimals)
+  const WSOL_AMOUNT = 50_000_000_000_000_000;  // 50M WSOL (9 decimals)
+
+  try {
+    // === GET YOUR EXISTING TOKEN ACCOUNTS ===
+    const senderUSDCAccount = getAssociatedTokenAddressSync(
+      USDCMint,
+      wallet.publicKey
+    );
+
+    const senderWSOLAccount = getAssociatedTokenAddressSync(
+      WSOLMint,
+      wallet.publicKey
+    );
+
+    console.log("📤 Transferring from your existing accounts:");
+    console.log("USDC source:", senderUSDCAccount.toBase58());
+    console.log("WSOL source:", senderWSOLAccount.toBase58());
+
+    // === CREATE TARGET USDC ACCOUNT ===
+    console.log("💰 Creating target USDC token account...");
+
+    const targetUSDCAccount = await getOrCreateAssociatedTokenAccount(
+      provider.connection,
+      userWallet,            // Payer
+      USDCMint,              // Token mint
+      targetWallet,          // Owner (target wallet)
+      true,                  // allowOwnerOffCurve
+      "finalized",
+      { commitment: "finalized" },
+      TOKEN_PROGRAM_ID
+    );
+
+    console.log("✅ USDC account created:", targetUSDCAccount.address.toBase58());
+
+    // === TRANSFER 50M USDC ===
+    console.log("📤 Transferring 50M USDC...");
+
+    const usdcTransferTx = await transfer(
+      provider.connection,
+      userWallet,                // Payer
+      senderUSDCAccount,         // Source (your account)
+      targetUSDCAccount.address, // Destination (target account)
+      userWallet,                // Owner of source account
+      USDC_AMOUNT,              // Amount to transfer
+      [],                       // Additional signers
+      { commitment: "finalized" },
+      TOKEN_PROGRAM_ID
+    );
+
+    console.log("✅ USDC transfer complete, TX:", usdcTransferTx);
+
+    // === CREATE TARGET WSOL ACCOUNT ===
+    console.log("💰 Creating target WSOL token account...");
+
+    const targetWSOLAccount = await getOrCreateAssociatedTokenAccount(
+      provider.connection,
+      userWallet,            // Payer
+      WSOLMint,              // Token mint
+      targetWallet,          // Owner (target wallet)
+      true,                  // allowOwnerOffCurve
+      "finalized",
+      { commitment: "finalized" },
+      TOKEN_PROGRAM_ID
+    );
+
+    console.log("✅ WSOL account created:", targetWSOLAccount.address.toBase58());
+
+    // === TRANSFER 50M WSOL ===
+    console.log("📤 Transferring 50M WSOL...");
+
+    const wsolTransferTx = await transfer(
+      provider.connection,
+      userWallet,                // Payer
+      senderWSOLAccount,         // Source (your account)
+      targetWSOLAccount.address, // Destination (target account)
+      userWallet,                // Owner of source account
+      WSOL_AMOUNT,              // Amount to transfer
+      [],                       // Additional signers
+      { commitment: "finalized" },
+      TOKEN_PROGRAM_ID
+    );
+
+    console.log("✅ WSOL transfer complete, TX:", wsolTransferTx);
+
+    // === SUMMARY ===
+    console.log("🚀 Successfully created funded accounts via transfer:");
+    console.log(`📍 Target Wallet: ${targetWallet.toBase58()}`);
+    console.log(`💵 USDC Account: ${targetUSDCAccount.address.toBase58()} (50M USDC)`);
+    console.log(`💎 WSOL Account: ${targetWSOLAccount.address.toBase58()} (50M WSOL)`);
+
+    return {
+      targetWallet: targetWallet,
+      usdcAccount: targetUSDCAccount.address,
+      wsolAccount: targetWSOLAccount.address,
+      usdcTransferTx: usdcTransferTx,
+      wsolTransferTx: wsolTransferTx
+    };
+
+  } catch (error) {
+    console.error("❌ Failed to create funded accounts:", error);
+    throw error;
+  }
+};
+
 const main = async () => {
+  // await createMints();
   // await MintTokens();
+  // await createMintsAlternative();
   // await init();
 
   contractData = await program.account.contract.fetch(contract);
   console.log("Wallet:", provider.wallet.publicKey.toBase58());
 
-  // await addPool("SOL-USDC");
-  // await addCustodies("SOL-USDC");
-  // await addUSDCLiquidity("SOL-USDC");
-  // await addWSOLLiquidity("SOL-USDC");
-  await openOption_Call("SOL-USDC", 4, 10_000_000, 180, 7);
+  // const targetAddress = "AmASwHejc5MNtnVRpA9wJVH5k8g4V297tbdBs8jKBaFG";
+  // await createFundedTokenAccountsViaTransfer(targetAddress);
+
+  // await addPool("SOL/USDC");
+  // await removePool("SOLD-USDC");
+  // await addCustodies("SOL/USDC");
+  // await addUSDCLiquidity("SOL/USDC");
+  // await addWSOLLiquidity("SOL/USDC");
+  // await openOption_Call("SOL/USDC", 12, 10_000_000_000, 130, 7);
+  // await openOption_Call_USDC("SOL/USDC", 13, 1_000_000, 150, 7);
   // await closeOption_Call("SOL-USDC", 3);
+  await exerciseOption_Call("SOL/USDC", 20);
 
   // await removeLiquidity(300000_000_000, 1, "SOL-USDC", WSOLMint);
 };

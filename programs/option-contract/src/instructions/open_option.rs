@@ -103,7 +103,7 @@ pub fn open_option(ctx: Context<OpenOption>, params: &OpenOptionParams) -> Resul
     )?;
 
     require_gte!(
-        pay_custody.token_owned,
+        locked_custody.token_owned,
         locked_custody.token_locked,
         OptionError::InvalidPoolBalanceError
     );
@@ -212,7 +212,7 @@ pub struct OpenOption<'info> {
 
     /// CHECK: oracle account for the position token
     #[account(
-        constraint = custody_oracle_account.key() == pay_custody.oracle
+        constraint = pay_custody_oracle_account.key() == pay_custody.oracle
     )]
     pub pay_custody_oracle_account: AccountInfo<'info>,
 
