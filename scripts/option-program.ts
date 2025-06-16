@@ -757,7 +757,7 @@ const openOption_Call = async (
       amount: new anchor.BN(_amount),
       strike: _strike,
       expiredTime: new anchor.BN(
-        Math.floor(Date.now() / 1000) + 86400 * _period
+        Math.floor(Date.now() / 1000) + /* 86400 */ 1 * _period
       ),
       period: new anchor.BN(_period),
       poolName: _poolName,
@@ -781,9 +781,27 @@ const openOption_Call = async (
 };
 
 const closeOption_Call = async (_poolName: string, _index: number) => {
-  let newPool: PublicKey = contractData.pools.pop();
-  let poolData = await program.account.pool.fetch(newPool);
-  console.log("poolData", newPool);
+  let newPool: PublicKey;
+  for (const poolPubkey of contractData.pools) {
+    try {
+      const poolData = await program.account.pool.fetch(poolPubkey);
+      if (poolData.name === _poolName) {
+        newPool = poolPubkey;
+        break;
+      }
+    } catch (error) {
+      console.log(`Error fetching pool ${poolPubkey.toBase58()}:`, error);
+      continue;
+    }
+  }
+
+  if (!newPool) {
+    console.log("❌ Pool not found:", _poolName);
+    return;
+  }
+
+  const poolData = await program.account.pool.fetch(newPool);
+  console.log("poolData", poolData);
   // close Option Call
 
   const [poolPDA] = PublicKey.findProgramAddressSync(
@@ -842,6 +860,8 @@ const closeOption_Call = async (_poolName: string, _index: number) => {
       wsolCustody = custody;
     }
   }
+  
+  const custodyData = await program.account.custody.fetch(wsolCustody);
   const [optionDetail] = PublicKey.findProgramAddressSync(
     [
       Buffer.from("option"),
@@ -868,6 +888,8 @@ const closeOption_Call = async (_poolName: string, _index: number) => {
       custody: wsolCustody,
       payCustody: payCustody,
       lockedCustody: lockedCustody,
+      custodyOracleAccount: custodyData.oracle,
+      payCustodyOracleAccount: custodyData.oracle,
       payCustodyTokenAccount: payCustodyTokenAccount,
       optionDetail: optionDetail,
       custodyMint: WSOLMint,
@@ -986,7 +1008,7 @@ const exerciseOption_Call = async (_poolName: string, _index: number) => {
         transferAuthority: transferAuthority,
         contract: contract,
         pool: poolPDA,
-        
+
         // ✅ ACCOUNT ORDER MATCHES RUST STRUCT
         custodyMint: WSOLMint,              // Mint first
         lockedCustodyMint: USDCMint,        // Mint first
@@ -1002,7 +1024,7 @@ const exerciseOption_Call = async (_poolName: string, _index: number) => {
 
     console.log("✅ Exercise option successful:", tx);
     return tx;
-    
+
   } catch (error) {
     console.log("❌ Transaction failed:", error.message);
     if (error.logs) {
@@ -1256,10 +1278,10 @@ const main = async () => {
   // await addCustodies("SOL/USDC");
   // await addUSDCLiquidity("SOL/USDC");
   // await addWSOLLiquidity("SOL/USDC");
-  // await openOption_Call("SOL/USDC", 12, 10_000_000_000, 130, 7);
+  await openOption_Call("SOL/USDC", 21, 10_000_000_000, 150, 500);
   // await openOption_Call_USDC("SOL/USDC", 13, 1_000_000, 150, 7);
-  // await closeOption_Call("SOL-USDC", 3);
-  await exerciseOption_Call("SOL/USDC", 20);
+  // await closeOption_Call("SOL/USDC", 18);
+  // await exerciseOption_Call("SOL/USDC", 20);
 
   // await removeLiquidity(300000_000_000, 1, "SOL-USDC", WSOLMint);
 };

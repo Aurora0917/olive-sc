@@ -26,6 +26,7 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, params: &ExerciseOptionPara
     let locked_custody = &mut ctx.accounts.locked_custody;
     let locked_custody_token_account = &mut ctx.accounts.locked_custody_token_account;
     let locked_oracle = &ctx.accounts.locked_oracle;
+    let custody_oracle = &ctx.accounts.custody_oracle;
 
     // ✅ CRITICAL VALIDATION CHECKS - Add these at the beginning
     require_gte!(user.option_index, params.option_index);
@@ -62,7 +63,9 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, params: &ExerciseOptionPara
 
     let token_price =
         OraclePrice::new_from_oracle(locked_oracle, current_timestamp, false)?;
-    let oracle_price = token_price.get_price();
+    let sol_price =
+        OraclePrice::new_from_oracle(custody_oracle, current_timestamp, false)?;
+    let oracle_price = sol_price.get_price();
 
     require_gte!(
         locked_custody.token_locked,
@@ -77,8 +80,28 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, params: &ExerciseOptionPara
             option_detail.strike_price,
             OptionError::InvalidPriceRequirementError
         );
-        // Calculate Sol Amount from Option Detail Value : call / covered sol
-        let amount = (oracle_price - option_detail.strike_price) * (option_detail.quantity as f64) / oracle_price;
+        
+        // Calculate profit amount for call option: (oracle_price - strike_price) * quantity
+        // Using safe decimal math to handle precision properly
+        let price_diff = math::checked_as_u64(oracle_price - option_detail.strike_price)?;
+        let amount = math::checked_decimal_mul(
+            price_diff,
+            0, // oracle price exponent (assuming normalized)
+            option_detail.quantity,
+            0, // quantity exponent 
+            -(custody.decimals as i32), // target token decimals
+        )?;        
+
+        // Use raw oracle price data instead of converted f64 to avoid precision loss
+        require_gt!(token_price.price, 0, OptionError::InvalidPriceRequirementError);
+        
+        let profit_per_unit = math::checked_decimal_div(
+            amount,
+            -(custody.decimals as i32), // amount is already in target decimals
+            token_price.price,
+            token_price.exponent,
+            -(custody.decimals as i32), // keep same precision
+        )?;
 
         // ✅ FIXED: Use the custody token account instead of custody metadata account
         contract.transfer_tokens(
@@ -86,10 +109,10 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, params: &ExerciseOptionPara
             funding_account.to_account_info(),
             transfer_authority.to_account_info(),
             token_program.to_account_info(),
-            amount as u64,
+            profit_per_unit,
         )?;
 
-        option_detail.profit = amount as u64;
+        option_detail.profit = profit_per_unit;
     } else {
         require_gte!(
             option_detail.strike_price,
@@ -97,8 +120,25 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, params: &ExerciseOptionPara
             OptionError::InvalidPriceRequirementError
         );
 
-        // Calculate Profit amount with option detail values:  put / case-secured usdc
-        let amount = (option_detail.strike_price - oracle_price) * (option_detail.quantity as f64);
+        // Calculate profit amount for put option: (strike_price - oracle_price) * quantity
+        // Using safe decimal math to handle precision properly
+        let price_diff = math::checked_as_u64(option_detail.strike_price - oracle_price)?;
+        let amount = math::checked_decimal_mul(
+            price_diff,
+            0, // oracle price exponent (assuming normalized)
+            option_detail.quantity,
+            0, // quantity exponent
+            -(custody.decimals as i32), // target token decimals
+        )?;
+        require_gt!(token_price.price, 0, OptionError::InvalidPriceRequirementError);
+        
+        let profit_per_unit = math::checked_decimal_div(
+            amount,
+            -(custody.decimals as i32), // amount is already in target decimals
+            token_price.price,
+            token_price.exponent,
+            -(locked_custody.decimals as i32), // keep same precision
+        )?;
 
         // ✅ FIXED: Use the custody token account instead of custody metadata account
         contract.transfer_tokens(
@@ -106,10 +146,10 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, params: &ExerciseOptionPara
             funding_account.to_account_info(),
             transfer_authority.to_account_info(),
             token_program.to_account_info(),
-            amount as u64,
+            profit_per_unit,
         )?;
 
-        option_detail.profit = amount as u64;
+        option_detail.profit = profit_per_unit;
     }
 
     // ✅ Mark option as exercised and invalid (these changes will now be saved!)
@@ -214,6 +254,12 @@ pub struct ExerciseOption<'info> {
         constraint = locked_oracle.key() == locked_custody.oracle
     )]
     pub locked_oracle: AccountInfo<'info>,
+
+    /// CHECK: oracle account for the solana token
+    #[account(
+        constraint = custody_oracle.key() == custody.oracle
+    )]
+    pub custody_oracle: AccountInfo<'info>,
 
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
