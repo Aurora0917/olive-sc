@@ -82,6 +82,15 @@ pub mod option_contract {
         instructions::remove_liquidity::remove_liquidity(ctx, &params)
     }
 
+    pub fn open_limit_option(ctx: Context<OpenLimitOption>, params: OpenLimitOptionParams) -> Result<()> {
+        instructions::open_limit_option::open_limit_option(ctx, &params)
+    }
+
+    // Buy option from user to liquidity pool before expired time by user
+    pub fn close_limit_option(ctx: Context<CloseLimitOption>, params: CloseLimitOptionParams) -> Result<()> {
+        instructions::close_limit_option::close_limit_option(ctx, &params)
+    }
+
     // Sell option froom liquidity to user
     pub fn open_option(ctx: Context<OpenOption>, params: OpenOptionParams) -> Result<()> {
         instructions::open_option::open_option(ctx, &params)

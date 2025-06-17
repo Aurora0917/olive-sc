@@ -15,6 +15,8 @@ pub enum OptionError {
     OptionNotValid,
     OptionAlreadyExercised,
     InsufficientFundsError,
+    InvalidQuantityError,
+    InsufficientQuantityError
 }
 
 #[error_code]

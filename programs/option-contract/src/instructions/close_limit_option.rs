@@ -10,13 +10,13 @@ use anchor_spl::{
 };
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
-pub struct CloseOptionParams {
+pub struct CloseLimitOptionParams {
     pub option_index: u64,
     pub pool_name: String,
     pub close_quantity: u64,  // Number of option contracts to close
 }
 
-pub fn close_option(ctx: Context<CloseOption>, params: &CloseOptionParams) -> Result<()> {
+pub fn close_limit_option(ctx: Context<CloseLimitOption>, params: &CloseLimitOptionParams) -> Result<()> {
     let token_program = &ctx.accounts.token_program;
     let option_detail = &mut ctx.accounts.option_detail;
     let closed_option_detail = &mut ctx.accounts.closed_option_detail;
@@ -201,8 +201,8 @@ pub fn close_option(ctx: Context<CloseOption>, params: &CloseOptionParams) -> Re
 }
 
 #[derive(Accounts)]
-#[instruction(params: CloseOptionParams)]
-pub struct CloseOption<'info> {
+#[instruction(params: CloseLimitOptionParams)]
+pub struct CloseLimitOption<'info> {
     #[account(mut)]
     pub owner: Signer<'info>,
 

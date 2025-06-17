@@ -25,10 +25,12 @@ pub struct OptionDetail {
     pub claimed: u64,     // cliamable amount after automaticaally exercise by bot.
     pub valid: bool,      // false - invalid/expried/exercised, true - valid
     pub bump: u8,
+    pub limit_price: u64,
+    pub executed: bool,
 }
 
 impl OptionDetail {
-    pub const LEN: usize = 8 * 12 + 1 * 3 + 32 * 5 + 8;
+    pub const LEN: usize = 8 * 13 + 1 * 4 + 32 * 5 + 8;
 
     pub fn normal_cdf(z: f64) -> f64 {
         let beta1 = -0.0004406;
