@@ -15,6 +15,10 @@ pub use create_lp_mint::*;
 pub use add_pool::*;
 pub use claim_option::*;
 pub use realloc_pool::*;
+pub use open_perp_position::*;
+pub use close_perp_position::*;
+pub use add_collateral::*;
+pub use remove_collateral::*;
 
 pub mod close_option;
 pub mod exercise_option;
@@ -33,3 +37,7 @@ pub mod remove_liquidity;
 pub mod create_lp_mint;
 pub mod claim_option;
 pub mod realloc_pool;
+pub mod open_perp_position;
+pub mod close_perp_position;
+pub mod add_collateral;
+pub mod remove_collateral;

@@ -58,25 +58,33 @@ pub fn open_option(ctx: Context<OpenOption>, params: &OpenOptionParams) -> Resul
     )?;
     
     let token_price = OraclePrice::new_from_oracle(custody_oracle_account, curtime, false)?;
-
     let oracle_price = token_price.get_price();
     let period_year = math::checked_as_f64(math::checked_float_div(params.period as f64, 365.0)?)?;
 
     msg!("oracle_price: {}", oracle_price);
     msg!("params.strike: {}", params.strike);
     msg!("period_year: {}", period_year);
-    // Calculate Premium in usd using black scholes formula.
-    let premium = OptionDetail::black_scholes(
+    
+    // Get utilization data for the option's underlying asset
+    let (token_locked, token_owned) = (locked_custody.token_locked, locked_custody.token_owned);
+    
+    
+    // Calculate Premium using enhanced Black-Scholes with dynamic borrow rate
+    let premium = OptionDetail::black_scholes_with_borrow_rate(
         oracle_price,
         params.strike,
         period_year,
-        custody.key() == locked_custody.key(),
-    );
-    msg!("premium: {}", premium);
+        custody.key() == locked_custody.key(), // call/put logic
+        token_locked,  // Current utilization of underlying asset
+        token_owned,   // Total supply of underlying asset
+        custody.key() == locked_custody.key(), // Asset type for rate calculation
+    )?;
+    
+    msg!("Enhanced premium with borrow rate: {}", premium);
 
     let pay_token_price = OraclePrice::new_from_oracle(pay_custody_oracle_account, curtime, false)?;
 
-    // Calculate Premium in pay_toke amount
+    // Calculate Premium in pay_token amount
     let pay_amount = math::checked_as_u64(
         math::checked_float_div(premium, pay_token_price.get_price())?
             * math::checked_powi(10.0, pay_custody.decimals as i32)?,
@@ -122,6 +130,7 @@ pub fn open_option(ctx: Context<OpenOption>, params: &OpenOptionParams) -> Resul
     option_detail.locked_asset = locked_custody.key();
     option_detail.pool = pool.key();
     option_detail.custody = custody.key();
+    option_detail.limit_price = 0;
     user.option_index = option_index;
 
     Ok(())
@@ -176,7 +185,7 @@ pub struct OpenOption<'info> {
     init_if_needed,
     payer = owner,
     space=User::LEN,
-    seeds = [b"user", owner.key().as_ref()],
+    seeds = [b"user_v2", owner.key().as_ref()],
     bump,
   )]
     pub user: Box<Account<'info, User>>,

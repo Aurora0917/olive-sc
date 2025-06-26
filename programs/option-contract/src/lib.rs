@@ -7,6 +7,9 @@ pub mod errors;
 pub mod instructions;
 pub mod math;
 pub mod state;
+pub mod utils;
+
+use state::OptionDetail;
 
 declare_id!("GSmqNhxAhrLJjcxd9G2ts3obF9va9QBRezm6PMQJuE9b");
 
@@ -121,4 +124,54 @@ pub mod option_contract {
     pub fn claim_option(ctx: Context<ClaimOption>, params: ClaimOptionParams) -> Result<()> {
         instructions::claim_option::claim_option(ctx, &params)
     }
+
+    //Open perpetual position
+    pub fn open_perp_position(ctx: Context<OpenPerpPosition>, params: OpenPerpPositionParams) -> Result<()> {
+        instructions::open_perp_position::open_perp_position(ctx, &params)
+    }
+
+    //Close perpetual position
+    pub fn close_perp_position(ctx: Context<ClosePerpPosition>, params: ClosePerpPositionParams) -> Result<()> {
+        instructions::close_perp_position::close_perp_position(ctx, &params)
+    }
+
+    //Add collateral
+    pub fn add_collateral(ctx: Context<AddCollateral>, params: AddCollateralParams) -> Result<()> {
+        instructions::add_collateral::add_collateral(ctx, &params)
+    }
+
+    //Remove collateral
+    pub fn remove_collateral(ctx: Context<RemoveCollateral>, params: RemoveCollateralParams) -> Result<()> {
+        instructions::remove_collateral::remove_collateral(ctx, &params)
+    }
+}
+
+pub fn get_pool_borrow_rates(
+    sol_locked: u64,
+    sol_owned: u64,
+    usdc_locked: u64,
+    usdc_owned: u64,
+) -> Result<(f64, f64)> {
+    let sol_rate = OptionDetail::get_sol_borrow_rate(sol_locked, sol_owned)?;
+    let usdc_rate = OptionDetail::get_usdc_borrow_rate(usdc_locked, usdc_owned)?;
+    Ok((sol_rate, usdc_rate))
+}
+
+/// Log pool utilization and rates (for debugging)
+pub fn log_pool_status(
+    sol_locked: u64,
+    sol_owned: u64,
+    usdc_locked: u64,
+    usdc_owned: u64,
+) -> Result<()> {
+    let sol_util = OptionDetail::calculate_utilization(sol_locked, sol_owned);
+    let usdc_util = OptionDetail::calculate_utilization(usdc_locked, usdc_owned);
+    let (sol_rate, usdc_rate) = get_pool_borrow_rates(sol_locked, sol_owned, usdc_locked, usdc_owned)?;
+
+    msg!(
+        "Pool Status - SOL: {:.0}% util, {:.2}% rate | USDC: {:.0}% util, {:.2}% rate",
+        sol_util, sol_rate, usdc_util, usdc_rate
+    );
+
+    Ok(())
 }

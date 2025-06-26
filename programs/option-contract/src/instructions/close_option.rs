@@ -74,14 +74,20 @@ pub fn close_option(ctx: Context<CloseOption>, params: &CloseOptionParams) -> Re
             current_time,
             false,
         )?.get_price();
-
-        // Recalculate current option value using Black-Scholes for full position
-        let bs_price_per_contract = OptionDetail::black_scholes(
+        
+        // Get utilization data for the option's underlying asset
+        let (token_locked, token_owned) = (locked_custody.token_locked, locked_custody.token_owned);
+        
+        // Calculate Premium using enhanced Black-Scholes with dynamic borrow rate
+        let bs_price_per_contract = OptionDetail::black_scholes_with_borrow_rate(
             underlying_price,
             option_detail.strike_price,
             remaining_years,
-            option_detail.option_type == 0, // 0 = call, 1 = put
-        );
+            option_detail.option_type == 0, // call/put logic
+            token_locked,  // Current utilization of underlying asset
+            token_owned,   // Total supply of underlying asset
+            option_detail.option_type == 0, // Asset type for rate calculation
+        )?;
 
         // Calculate proportional premium for close quantity
         let bs_price_partial = bs_price_per_contract * params.close_quantity as f64;
@@ -147,53 +153,53 @@ pub fn close_option(ctx: Context<CloseOption>, params: &CloseOptionParams) -> Re
             refund_amount,
         )?;
 
-        // Update original position (reduce by closed amount)
-        option_detail.quantity = math::checked_sub(option_detail.quantity, params.close_quantity)?;
-        option_detail.amount = math::checked_sub(option_detail.amount, unlock_amount)?;
-
-        // Handle closed position tracking
-        if closed_option_detail.quantity > 0 {
-            
-            msg!("Second Partial {}", closed_option_detail.quantity);
-            // Accumulate to existing closed position
-            closed_option_detail.quantity = math::checked_add(
-                closed_option_detail.quantity, 
-                params.close_quantity
-            )?;
-            closed_option_detail.amount = math::checked_add(
-                closed_option_detail.amount, 
-                unlock_amount
-            )?;
-            closed_option_detail.bought_back = current_time as u64; // Update to latest close time
-        } else {
-            
-            msg!("Create Partial {}", params.close_quantity);
-            // Initialize new closed position (first partial close) - following open_option.rs pattern
-            closed_option_detail.valid = false; // Mark as closed position
-            closed_option_detail.quantity = params.close_quantity;
-            closed_option_detail.amount = unlock_amount;
-            closed_option_detail.owner = option_detail.owner;
-            closed_option_detail.index = closed_option_detail.index;
-            closed_option_detail.period = option_detail.period;
-            closed_option_detail.expired_date = option_detail.expired_date;
-            closed_option_detail.purchase_date = option_detail.purchase_date;
-            closed_option_detail.option_type = option_detail.option_type;
-            closed_option_detail.strike_price = option_detail.strike_price;
-            closed_option_detail.premium_asset = option_detail.premium_asset;
-            closed_option_detail.locked_asset = option_detail.locked_asset;
-            closed_option_detail.pool = pool.key();
-            closed_option_detail.custody = custody.key();
-            closed_option_detail.premium = math::checked_div(
-                math::checked_mul(option_detail.premium, params.close_quantity)?,
-                option_detail.quantity
-            )?; // Proportional premium for closed quantity
-            closed_option_detail.bought_back = current_time as u64;
-        }
-
-        // If original position is fully closed, invalidate it
-        if option_detail.quantity == 0 {
+        if option_detail.quantity == params.close_quantity {
             option_detail.valid = false;
             option_detail.bought_back = current_time as u64;
+        } else {
+
+            // Handle closed position tracking
+            if closed_option_detail.quantity > 0 {
+                
+                msg!("Second Partial {}", closed_option_detail.quantity);
+                // Accumulate to existing closed position
+                closed_option_detail.quantity = math::checked_add(
+                    closed_option_detail.quantity, 
+                    params.close_quantity
+                )?;
+                closed_option_detail.amount = math::checked_add(
+                    closed_option_detail.amount, 
+                    unlock_amount
+                )?;
+                closed_option_detail.bought_back = current_time as u64; // Update to latest close time
+            } else {
+                
+                msg!("Create Partial {}", params.close_quantity);
+                // Initialize new closed position (first partial close) - following open_option.rs pattern
+                closed_option_detail.valid = false; // Mark as closed position
+                closed_option_detail.quantity = params.close_quantity;
+                closed_option_detail.amount = unlock_amount;
+                closed_option_detail.owner = option_detail.owner;
+                closed_option_detail.index = closed_option_detail.index;
+                closed_option_detail.period = option_detail.period;
+                closed_option_detail.expired_date = option_detail.expired_date;
+                closed_option_detail.purchase_date = option_detail.purchase_date;
+                closed_option_detail.option_type = option_detail.option_type;
+                closed_option_detail.strike_price = option_detail.strike_price;
+                closed_option_detail.premium_asset = option_detail.premium_asset;
+                closed_option_detail.locked_asset = option_detail.locked_asset;
+                closed_option_detail.pool = pool.key();
+                closed_option_detail.custody = custody.key();
+                closed_option_detail.premium = math::checked_div(
+                    math::checked_mul(option_detail.premium, params.close_quantity)?,
+                    option_detail.quantity
+                )?; // Proportional premium for closed quantity
+                closed_option_detail.bought_back = current_time as u64;
+            }
+            
+            // Update original position (reduce by closed amount)
+            option_detail.quantity = math::checked_sub(option_detail.quantity, params.close_quantity)?;
+            option_detail.amount = math::checked_sub(option_detail.amount, unlock_amount)?;
         }
     }
 
@@ -236,7 +242,7 @@ pub struct CloseOption<'info> {
     pub pool: Box<Account<'info, Pool>>,
 
     #[account(
-        seeds = [b"user", owner.key().as_ref()],
+        seeds = [b"user_v2", owner.key().as_ref()],
         bump,
     )]
     pub user: Box<Account<'info, User>>,
@@ -299,7 +305,7 @@ pub struct CloseOption<'info> {
     #[account(
         init_if_needed,
         payer = owner,
-        space = 8 + OptionDetail::LEN,
+        space = OptionDetail::LEN,
         seeds = [b"option", owner.key().as_ref(),
             params.option_index.to_le_bytes().as_ref(),
             pool.key().as_ref(), custody.key().as_ref(),

@@ -106,6 +106,32 @@ where
     }
 }
 
+pub fn checked_float_add<T>(arg1: T, arg2: T) -> Result<T>
+where
+    T: num_traits::Float + Display,
+{
+    let result = arg1 + arg2;
+    if result.is_finite() {
+        Ok(result)
+    } else {
+        msg!("Math error: checked_float_add overflow {} + {}", arg1, arg2);
+        Err(error!(crate::errors::OptionError::MathOverflow))
+    }
+}
+
+pub fn checked_float_sub<T>(arg1: T, arg2: T) -> Result<T>
+where
+    T: num_traits::Float + Display,
+{
+    let result = arg1 - arg2;
+    if result.is_finite() {
+        Ok(result)
+    } else {
+        msg!("Math error: checked_float_sub overflow {} - {}", arg1, arg2);
+        Err(error!(crate::errors::OptionError::MathOverflow))
+    }
+}
+
 pub fn checked_as_f64<T>(arg: T) -> Result<f64>
 where
     T: Display + num_traits::ToPrimitive + Clone,

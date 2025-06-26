@@ -146,7 +146,7 @@ pub struct AutoExerciseOption<'info> {
     pub custody: Box<Account<'info, Custody>>, // Target price asset
 
     #[account(
-        seeds = [b"user", params.user.key().as_ref()],
+        seeds = [b"user_v2", params.user.key().as_ref()],
         bump,
     )]
     pub user: Box<Account<'info, User>>,
