@@ -2,11 +2,10 @@
 use crate::{
     errors::OptionError,
     math,
-    state::{Contract, Custody, OraclePrice, Pool},
+    state::{Contract, Custody, OraclePrice, Pool, PerpPosition, PerpSide},
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
-use super::{PerpPosition, PerpSide};
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct LiquidateParams {
@@ -39,37 +38,51 @@ pub fn liquidate(
     msg!("SOL Price: {}", current_sol_price);
     msg!("USDC Price: {}", usdc_price_value);
     msg!("Liquidating position owned by: {}", position.owner);
+    msg!("Position liquidation price: {}", position.liquidation_price);
     
-    // Determine collateral asset info
+    // Check if position can be liquidated (simple price comparison)
+    let liquidatable = match position.side {
+        PerpSide::Long => {
+            msg!("Long position: current_price {} <= liquidation_price {}", current_sol_price, position.liquidation_price);
+            current_sol_price <= position.liquidation_price
+        },
+        PerpSide::Short => {
+            msg!("Short position: current_price {} >= liquidation_price {}", current_sol_price, position.liquidation_price);
+            current_sol_price >= position.liquidation_price
+        }
+    };
+    
+    require!(liquidatable, OptionError::PositionNotLiquidatable);
+    msg!("Position is eligible for liquidation");
+    
+    // Determine collateral asset info (same logic as open_perp)
     let (collateral_price, collateral_decimals) = if position.collateral_asset == position.sol_custody {
         (current_sol_price, sol_custody.decimals)
     } else {
         (usdc_price_value, usdc_custody.decimals)
     };
     
-    // Update position with current P&L and margin ratio
-    position.update_position(current_sol_price, current_time, collateral_price)?;
+    // Calculate P&L for settlement
+    let price_diff = match position.side {
+        PerpSide::Long => current_sol_price - position.entry_price,
+        PerpSide::Short => position.entry_price - current_sol_price,
+    };
     
-    msg!("Position margin ratio: {}%", position.margin_ratio * 100.0);
-    msg!("Liquidation threshold: {}%", PerpPosition::LIQUIDATION_THRESHOLD * 100.0);
+    let position_value_usd = position.position_size as f64 / math::checked_powi(10.0, sol_custody.decimals as i32)?;
+    let pnl_ratio = math::checked_float_div(price_diff, position.entry_price)?;
+    let unrealized_pnl_usd = math::checked_float_mul(pnl_ratio, position_value_usd)?;
+    let total_pnl = (unrealized_pnl_usd * 1_000_000.0) as i64; // Convert to micro-USD
     
-    // Check if position can be liquidated (margin ratio below threshold)
-    require!(
-        position.margin_ratio <= PerpPosition::LIQUIDATION_THRESHOLD,
-        OptionError::PositionNotLiquidatable
-    );
+    msg!("Total P&L: ${}", total_pnl as f64 / 1_000_000.0);
     
-    msg!("Position is eligible for liquidation");
-    
-    // Calculate liquidation amounts
-    let total_pnl = position.unrealized_pnl;
-    let collateral_value_tokens = position.collateral_amount as f64 / math::checked_powi(10.0, collateral_decimals)?;
+    // Calculate liquidation amounts (same as close_perp logic)
+    let collateral_value_tokens = position.collateral_amount as f64 / math::checked_powi(10.0, collateral_decimals as i32)?;
     let collateral_value_usd = math::checked_float_mul(collateral_value_tokens, collateral_price)?;
     
     // Calculate settlement after P&L
     let settlement_value_usd = collateral_value_usd + (total_pnl as f64 / 1_000_000.0);
     let settlement_amount_tokens = if settlement_value_usd > 0.0 {
-        math::checked_as_u64(settlement_value_usd / collateral_price * math::checked_powi(10.0, collateral_decimals)?)?
+        math::checked_as_u64(settlement_value_usd / collateral_price * math::checked_powi(10.0, collateral_decimals as i32)?)?
     } else {
         0 // Total loss
     };
@@ -95,16 +108,17 @@ pub fn liquidate(
     msg!("Liquidation reward: {}", liquidation_reward);
     msg!("User receives: {}", user_settlement);
     
-    // Unlock locked tokens based on position side
+    // Unlock locked tokens based on position side (MATCH open_perp/close_perp logic)
     match position.side {
         PerpSide::Long => {
+            // Unlock SOL tokens for long position
             sol_custody.token_locked = math::checked_sub(sol_custody.token_locked, position.position_size)?;
         },
         PerpSide::Short => {
+            // Use same 1:1 SOL:USDC token ratio as open_perp/close_perp
             let position_value_sol = position.position_size as f64 / math::checked_powi(10.0, sol_custody.decimals as i32)?;
-            let position_value_usd = math::checked_float_mul(position_value_sol, position.entry_price)?;
             let usdc_to_unlock = math::checked_as_u64(
-                position_value_usd * math::checked_powi(10.0, usdc_custody.decimals as i32)?
+                position_value_sol * math::checked_powi(10.0, usdc_custody.decimals as i32)?
             )?;
             usdc_custody.token_locked = math::checked_sub(usdc_custody.token_locked, usdc_to_unlock)?;
         }
@@ -154,7 +168,7 @@ pub fn liquidate(
         msg!("Transferred {} tokens to liquidator as reward", liquidation_reward);
     }
     
-    // Update custody stats - remove all collateral from the system
+    // Update custody stats - remove all collateral from the system (same as open_perp logic)
     if position.collateral_asset == position.sol_custody {
         sol_custody.token_owned = math::checked_sub(sol_custody.token_owned, position.collateral_amount)?;
     } else {

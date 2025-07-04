@@ -1,6 +1,5 @@
-
 use anchor_lang::prelude::*;
-use crate::{utils::borrow_rate_curve::*, utils::Fraction};
+use crate::{utils::borrow_rate_curve::*, utils::Fraction, errors::OptionError, math};
 
 #[account]
 pub struct OptionDetail {
@@ -29,10 +28,15 @@ pub struct OptionDetail {
     pub bump: u8,
     pub limit_price: u64,
     pub executed: bool,
+    
+    // NEW FIELD
+    pub entry_price: f64,     // Underlying asset price when option was purchased
+    pub last_update_time: i64, // Last time option was updated
 }
 
 impl OptionDetail {
-    pub const LEN: usize = 8 * 13 + 1 * 4 + 32 * 5 + 8;
+    // Updated length calculation: added 8 bytes for entry_price (f64) + 8 bytes for last_update_time (i64)
+    pub const LEN: usize = 8 * 15 + 1 * 4 + 32 * 5 + 8;
 
     pub fn normal_cdf(z: f64) -> f64 {
         let beta1 = -0.0004406;
@@ -109,7 +113,6 @@ impl OptionDetail {
         Self::calculate_borrow_rate(usdc_locked, usdc_owned, false)
     }
     
-
     /// Enhanced Black-Scholes with dynamic risk-free rate from borrow curves
     pub fn black_scholes_with_borrow_rate(
         s: f64,               // Current price
@@ -139,5 +142,72 @@ impl OptionDetail {
         };
 
         Ok(price)
+    }
+
+    /// Update option with current market data (similar to update_position)
+    pub fn update_option(
+        &mut self, 
+        current_price: f64, 
+        current_time: i64,
+        token_locked: u64,
+        token_owned: u64,
+        is_sol: bool
+    ) -> Result<()> {
+        // Check if option is still valid
+        if !self.valid || current_time > self.expired_date {
+            return Ok(()); // Don't update invalid/expired options
+        }
+
+        // Calculate time to expiration in years
+        let time_to_expiry = math::checked_float_div(
+            (self.expired_date - current_time) as f64,
+            365.25 * 24.0 * 3600.0 // seconds in a year
+        )?;
+
+        // If time to expiry is <= 0, option is expired
+        if time_to_expiry <= 0.0 {
+            self.valid = false;
+            return Ok(());
+        }
+
+        // Calculate current option value using Black-Scholes with dynamic rates
+        let current_option_value = Self::black_scholes_with_borrow_rate(
+            current_price,
+            self.strike_price,
+            time_to_expiry,
+            self.option_type == 0, // 0 = call, 1 = put
+            token_locked,
+            token_owned,
+            is_sol
+        )?;
+
+        // Calculate profit/loss
+        // Convert current_option_value to the same scale as premium
+        let current_value_scaled = (current_option_value * 1_000_000.0) as u64; // Assume 6 decimals
+        
+        if current_value_scaled > self.premium {
+            self.profit = current_value_scaled - self.premium;
+        } else {
+            self.profit = 0; // No negative profit, just loss
+        }
+
+        // Check if limit price conditions are met for automatic execution
+        if !self.executed && self.limit_price > 0 {
+            let should_execute = if self.option_type == 0 { // Call option
+                current_price >= (self.limit_price as f64 / 1_000_000.0) // Assuming 6 decimal scaling
+            } else { // Put option
+                current_price <= (self.limit_price as f64 / 1_000_000.0)
+            };
+
+            if should_execute {
+                self.executed = true;
+                self.exercised = current_time as u64;
+            }
+        }
+
+        // Update last update time
+        self.last_update_time = current_time;
+
+        Ok(())
     }
 }

@@ -108,7 +108,7 @@ pub struct ClaimOption<'info> {
     pub locked_custody_mint: Box<Account<'info, Mint>>,
 
     #[account(
-        seeds = [b"user_v2", owner.key().as_ref()],
+        seeds = [b"user", owner.key().as_ref()],
         bump,
     )]
     pub user: Box<Account<'info, User>>,

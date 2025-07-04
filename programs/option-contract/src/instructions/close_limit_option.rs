@@ -245,7 +245,7 @@ pub struct CloseLimitOption<'info> {
     pub pool: Box<Account<'info, Pool>>,
 
     #[account(
-        seeds = [b"user_v2", owner.key().as_ref()],
+        seeds = [b"user", owner.key().as_ref()],
         bump,
     )]
     pub user: Box<Account<'info, User>>,

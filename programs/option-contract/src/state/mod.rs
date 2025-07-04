@@ -5,6 +5,7 @@ pub use contract::*;
 pub use oracle::*;
 pub use pool::*;
 pub use custody::*;
+pub use perpetuals::*;
 
 pub mod option;
 pub mod user;
@@ -13,3 +14,4 @@ pub mod contract;
 pub mod oracle;
 pub mod pool;
 pub mod custody;
+pub mod perpetuals;

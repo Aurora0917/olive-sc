@@ -11,7 +11,7 @@ pub mod utils;
 
 use state::OptionDetail;
 
-declare_id!("GSmqNhxAhrLJjcxd9G2ts3obF9va9QBRezm6PMQJuE9b");
+declare_id!("Gz4U6LcbehnjbuhVXEFEAAomXHuQPU4TrwYyR56NPGnc");
 
 #[program]
 pub mod option_contract {
@@ -94,9 +94,14 @@ pub mod option_contract {
         instructions::close_limit_option::close_limit_option(ctx, &params)
     }
 
-    // Sell option froom liquidity to user
+    // Sell option from liquidity to user
     pub fn open_option(ctx: Context<OpenOption>, params: OpenOptionParams) -> Result<()> {
         instructions::open_option::open_option(ctx, &params)
+    }
+
+    // Edit option
+    pub fn edit_option(ctx: Context<EditOption>, params: EditOptionParams) -> Result<()> {
+        instructions::edit_option::edit_option(ctx, &params)
     }
 
     // Buy option from user to liquidity pool before expired time by user
@@ -143,6 +148,11 @@ pub mod option_contract {
     //Remove collateral
     pub fn remove_collateral(ctx: Context<RemoveCollateral>, params: RemoveCollateralParams) -> Result<()> {
         instructions::remove_collateral::remove_collateral(ctx, &params)
+    }
+
+    //Liquidate position
+    pub fn liquidate(ctx: Context<Liquidate>, params: LiquidateParams) -> Result<()> {
+        instructions::liquidate::liquidate(ctx, &params)
     }
 }
 

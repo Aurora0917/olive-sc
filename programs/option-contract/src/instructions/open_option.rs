@@ -131,6 +131,8 @@ pub fn open_option(ctx: Context<OpenOption>, params: &OpenOptionParams) -> Resul
     option_detail.pool = pool.key();
     option_detail.custody = custody.key();
     option_detail.limit_price = 0;
+    option_detail.entry_price = oracle_price;
+    option_detail.bump = ctx.bumps.option_detail;  
     user.option_index = option_index;
 
     Ok(())
@@ -185,7 +187,7 @@ pub struct OpenOption<'info> {
     init_if_needed,
     payer = owner,
     space=User::LEN,
-    seeds = [b"user_v2", owner.key().as_ref()],
+    seeds = [b"user", owner.key().as_ref()],
     bump,
   )]
     pub user: Box<Account<'info, User>>,

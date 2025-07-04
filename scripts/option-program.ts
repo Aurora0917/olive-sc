@@ -780,126 +780,126 @@ const openOption_Call = async (
   console.log("openOptionTx:", tx);
 };
 
-const closeOption_Call = async (_poolName: string, _index: number) => {
-  let newPool: PublicKey;
-  for (const poolPubkey of contractData.pools) {
-    try {
-      const poolData = await program.account.pool.fetch(poolPubkey);
-      if (poolData.name === _poolName) {
-        newPool = poolPubkey;
-        break;
-      }
-    } catch (error) {
-      console.log(`Error fetching pool ${poolPubkey.toBase58()}:`, error);
-      continue;
-    }
-  }
+// const closeOption_Call = async (_poolName: string, _index: number) => {
+//   let newPool: PublicKey;
+//   for (const poolPubkey of contractData.pools) {
+//     try {
+//       const poolData = await program.account.pool.fetch(poolPubkey);
+//       if (poolData.name === _poolName) {
+//         newPool = poolPubkey;
+//         break;
+//       }
+//     } catch (error) {
+//       console.log(`Error fetching pool ${poolPubkey.toBase58()}:`, error);
+//       continue;
+//     }
+//   }
 
-  if (!newPool) {
-    console.log("❌ Pool not found:", _poolName);
-    return;
-  }
+//   if (!newPool) {
+//     console.log("❌ Pool not found:", _poolName);
+//     return;
+//   }
 
-  const poolData = await program.account.pool.fetch(newPool);
-  console.log("poolData", poolData);
-  // close Option Call
+//   const poolData = await program.account.pool.fetch(newPool);
+//   console.log("poolData", poolData);
+//   // close Option Call
 
-  const [poolPDA] = PublicKey.findProgramAddressSync(
-    [Buffer.from("pool"), Buffer.from(_poolName)],
-    program.programId
-  );
-  const fundingAccount = getAssociatedTokenAddressSync(
-    WSOLMint,
-    wallet.publicKey
-  );
-  const [lpTokenMint] = PublicKey.findProgramAddressSync(
-    [Buffer.from("lp_token_mint"), Buffer.from(_poolName)],
-    program.programId
-  );
-  const [custodyTokenAccount] = PublicKey.findProgramAddressSync(
-    [
-      Buffer.from("custody_token_account"),
-      newPool.toBuffer(),
-      WSOLMint.toBuffer(),
-    ],
-    program.programId
-  );
-  const [transferAuthority] = PublicKey.findProgramAddressSync(
-    [Buffer.from("transfer_authority")],
-    program.programId
-  );
-  const [user] = PublicKey.findProgramAddressSync(
-    [Buffer.from("user"), wallet.publicKey.toBuffer()],
-    program.programId
-  );
-  const [lockedCustody] = PublicKey.findProgramAddressSync(
-    [Buffer.from("custody"), newPool.toBuffer(), WSOLMint.toBuffer()],
-    program.programId
-  );
-  const [payCustody] = PublicKey.findProgramAddressSync(
-    [Buffer.from("custody"), newPool.toBuffer(), WSOLMint.toBuffer()],
-    program.programId
-  );
-  const [payCustodyTokenAccount] = PublicKey.findProgramAddressSync(
-    [
-      Buffer.from("custody_token_account"),
-      newPool.toBuffer(),
-      WSOLMint.toBuffer(),
-    ],
-    program.programId
-  );
-  const lpTokenAccount = getAssociatedTokenAddressSync(
-    lpTokenMint,
-    wallet.publicKey
-  );
-  let wsolCustody: PublicKey;
-  for await (let custody of poolData.custodies) {
-    let c = await program.account.custody.fetch(new PublicKey(custody));
-    let mint = c.mint;
-    if (mint.toBase58() == WSOLMint?.toBase58()) {
-      wsolCustody = custody;
-    }
-  }
+//   const [poolPDA] = PublicKey.findProgramAddressSync(
+//     [Buffer.from("pool"), Buffer.from(_poolName)],
+//     program.programId
+//   );
+//   const fundingAccount = getAssociatedTokenAddressSync(
+//     WSOLMint,
+//     wallet.publicKey
+//   );
+//   const [lpTokenMint] = PublicKey.findProgramAddressSync(
+//     [Buffer.from("lp_token_mint"), Buffer.from(_poolName)],
+//     program.programId
+//   );
+//   const [custodyTokenAccount] = PublicKey.findProgramAddressSync(
+//     [
+//       Buffer.from("custody_token_account"),
+//       newPool.toBuffer(),
+//       WSOLMint.toBuffer(),
+//     ],
+//     program.programId
+//   );
+//   const [transferAuthority] = PublicKey.findProgramAddressSync(
+//     [Buffer.from("transfer_authority")],
+//     program.programId
+//   );
+//   const [user] = PublicKey.findProgramAddressSync(
+//     [Buffer.from("user"), wallet.publicKey.toBuffer()],
+//     program.programId
+//   );
+//   const [lockedCustody] = PublicKey.findProgramAddressSync(
+//     [Buffer.from("custody"), newPool.toBuffer(), WSOLMint.toBuffer()],
+//     program.programId
+//   );
+//   const [payCustody] = PublicKey.findProgramAddressSync(
+//     [Buffer.from("custody"), newPool.toBuffer(), WSOLMint.toBuffer()],
+//     program.programId
+//   );
+//   const [payCustodyTokenAccount] = PublicKey.findProgramAddressSync(
+//     [
+//       Buffer.from("custody_token_account"),
+//       newPool.toBuffer(),
+//       WSOLMint.toBuffer(),
+//     ],
+//     program.programId
+//   );
+//   const lpTokenAccount = getAssociatedTokenAddressSync(
+//     lpTokenMint,
+//     wallet.publicKey
+//   );
+//   let wsolCustody: PublicKey;
+//   for await (let custody of poolData.custodies) {
+//     let c = await program.account.custody.fetch(new PublicKey(custody));
+//     let mint = c.mint;
+//     if (mint.toBase58() == WSOLMint?.toBase58()) {
+//       wsolCustody = custody;
+//     }
+//   }
   
-  const custodyData = await program.account.custody.fetch(wsolCustody);
-  const [optionDetail] = PublicKey.findProgramAddressSync(
-    [
-      Buffer.from("option"),
-      wallet.publicKey.toBuffer(),
-      new anchor.BN(_index).toArrayLike(Buffer, "le", 8),
-      newPool.toBuffer(),
-      wsolCustody.toBuffer(),
-    ],
-    program.programId
-  );
+//   const custodyData = await program.account.custody.fetch(wsolCustody);
+//   const [optionDetail] = PublicKey.findProgramAddressSync(
+//     [
+//       Buffer.from("option"),
+//       wallet.publicKey.toBuffer(),
+//       new anchor.BN(_index).toArrayLike(Buffer, "le", 8),
+//       newPool.toBuffer(),
+//       wsolCustody.toBuffer(),
+//     ],
+//     program.programId
+//   );
 
-  const tx = await program.methods
-    .closeOption({
-      optionIndex: new anchor.BN(_index),
-      poolName: _poolName,
-    })
-    .accountsPartial({
-      owner: wallet.publicKey,
-      fundingAccount: fundingAccount,
-      transferAuthority: transferAuthority,
-      contract: contract,
-      pool: poolPDA,
-      user: user,
-      custody: wsolCustody,
-      payCustody: payCustody,
-      lockedCustody: lockedCustody,
-      custodyOracleAccount: custodyData.oracle,
-      payCustodyOracleAccount: custodyData.oracle,
-      payCustodyTokenAccount: payCustodyTokenAccount,
-      optionDetail: optionDetail,
-      custodyMint: WSOLMint,
-      payCustodyMint: WSOLMint,
-    })
-    .signers([wallet.payer])
-    .rpc(); // {skipPreflight: true}
+//   const tx = await program.methods
+//     .closeOption({
+//       optionIndex: new anchor.BN(_index),
+//       poolName: _poolName,
+//     })
+//     .accountsPartial({
+//       owner: wallet.publicKey,
+//       fundingAccount: fundingAccount,
+//       transferAuthority: transferAuthority,
+//       contract: contract,
+//       pool: poolPDA,
+//       user: user,
+//       custody: wsolCustody,
+//       payCustody: payCustody,
+//       lockedCustody: lockedCustody,
+//       custodyOracleAccount: custodyData.oracle,
+//       payCustodyOracleAccount: custodyData.oracle,
+//       payCustodyTokenAccount: payCustodyTokenAccount,
+//       optionDetail: optionDetail,
+//       custodyMint: WSOLMint,
+//       payCustodyMint: WSOLMint,
+//     })
+//     .signers([wallet.payer])
+//     .rpc(); // {skipPreflight: true}
 
-  console.log("closeOptionTx:", tx);
-};
+//   console.log("closeOptionTx:", tx);
+// };
 
 const exerciseOption_Call = async (_poolName: string, _index: number) => {
   // Find pool by name
@@ -1277,8 +1277,8 @@ const main = async () => {
   // await removePool("SOLD-USDC");
   // await addCustodies("SOL/USDC");
   // await addUSDCLiquidity("SOL/USDC");
-  // await addWSOLLiquidity("SOL/USDC");
-  await openOption_Call("SOL/USDC", 21, 10_000_000_000, 150, 500);
+  await addWSOLLiquidity("SOL/USDC");
+  // await openOption_Call("SOL/USDC", 21, 10_000_000_000, 150, 500);
   // await openOption_Call_USDC("SOL/USDC", 13, 1_000_000, 150, 7);
   // await closeOption_Call("SOL/USDC", 18);
   // await exerciseOption_Call("SOL/USDC", 20);

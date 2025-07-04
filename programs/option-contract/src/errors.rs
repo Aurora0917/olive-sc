@@ -36,6 +36,10 @@ pub enum OptionError {
     InvalidPoolName,
     InsufficientCollateral,
     InvalidCollateralAsset,
+    PositionNotLiquidatable,
+    SlippageExceededError,
+    InvalidParameterError,
+    OptionExpired
 }
 
 #[error_code]

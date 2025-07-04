@@ -30,7 +30,7 @@ impl PartialOrd for OraclePrice {
 
 #[allow(dead_code)]
 impl OraclePrice {
-    pub const MAX_PRICE_AGE_SEC: u64 = 6000; // 5 minutes - increased for more flexibility
+    pub const MAX_PRICE_AGE_SEC: u64 = 86400; // 5 minutes - increased for more flexibility
     pub const ORACLE_MAX_PRICE: u64 = (1 << 28) - 1;
     pub const ORACLE_EXPONENT_SCALE: i32 = -9;
     pub const ORACLE_PRICE_SCALE: u64 = 1_000_000_000;

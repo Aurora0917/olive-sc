@@ -1,11 +1,10 @@
 use crate::{
     errors::OptionError,
     math,
-    state::{Contract, Custody, OraclePrice, Pool},
+    state::{Contract, Custody, OraclePrice, Pool, PerpPosition, PerpSide},
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
-use super::{PerpPosition, PerpSide};
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct ClosePerpPositionParams {

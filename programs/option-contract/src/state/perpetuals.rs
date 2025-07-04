@@ -1,285 +1,79 @@
-use {
-    anchor_lang::prelude::*,
-    anchor_spl::token::{Burn, MintTo, Transfer},
+use crate::{
+    errors::OptionError,
+    math,
+    state::{Contract, Custody, OraclePrice, Pool, User, OptionDetail},
 };
+use anchor_lang::prelude::*;
 
-#[derive(Copy, Clone, PartialEq, AnchorSerialize, AnchorDeserialize, Default, Debug)]
-pub struct PriceAndFee {
-    pub price: u64,
-    pub fee: u64,
-}
-
-#[derive(Copy, Clone, PartialEq, AnchorSerialize, AnchorDeserialize, Default, Debug)]
-pub struct AmountAndFee {
-    pub amount: u64,
-    pub fee: u64,
-}
-
-#[derive(Copy, Clone, PartialEq, AnchorSerialize, AnchorDeserialize, Default, Debug)]
-pub struct NewPositionPricesAndFee {
-    pub entry_price: u64,
-    pub liquidation_price: u64,
-    pub fee: u64,
-}
-
-#[derive(Copy, Clone, PartialEq, AnchorSerialize, AnchorDeserialize, Default, Debug)]
-pub struct SwapAmountAndFees {
-    pub amount_out: u64,
-    pub fee_in: u64,
-    pub fee_out: u64,
-}
-
-#[derive(Copy, Clone, PartialEq, AnchorSerialize, AnchorDeserialize, Default, Debug)]
-pub struct ProfitAndLoss {
-    pub profit: u64,
-    pub loss: u64,
-}
-
-#[derive(Copy, Clone, PartialEq, AnchorSerialize, AnchorDeserialize, Default, Debug)]
-pub struct Permissions {
-    pub allow_swap: bool,
-    pub allow_add_liquidity: bool,
-    pub allow_remove_liquidity: bool,
-    pub allow_open_position: bool,
-    pub allow_close_position: bool,
-    pub allow_pnl_withdrawal: bool,
-    pub allow_collateral_withdrawal: bool,
-    pub allow_size_change: bool,
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq)]
+pub enum PerpSide {
+    Long,  // Betting SOL price goes up
+    Short, // Betting SOL price goes down
 }
 
 #[account]
-#[derive(Default, Debug)]
-pub struct Perpetuals {
-    pub permissions: Permissions,
-    pub pools: Vec<Pubkey>,
-
-    pub transfer_authority_bump: u8,
-    pub perpetuals_bump: u8,
-    // time of inception, also used as current wall clock time for testing
-    pub inception_time: i64,
+pub struct PerpPosition {
+    pub owner: Pubkey,
+    pub pool: Pubkey,
+    pub sol_custody: Pubkey,
+    pub usdc_custody: Pubkey,
+    
+    // Position details
+    pub side: PerpSide,
+    pub collateral_amount: u64,    // Collateral amount in the collateral asset
+    pub collateral_asset: Pubkey,  // Which asset is used as collateral (SOL or USDC custody)
+    pub position_size: u64,        // SOL position size
+    pub leverage: f64,             // Calculated leverage
+    pub entry_price: f64,          // SOL price when opened
+    pub liquidation_price: f64,    // Price at which position gets liquidated
+    
+    // Tracking
+    pub open_time: i64,
+    pub last_update_time: i64,
+    pub unrealized_pnl: i64,       // Positive or negative P&L in USD
+    
+    // Risk management
+    pub margin_ratio: f64,         // Current margin ratio
+    pub is_liquidated: bool,
+    
+    pub bump: u8,
 }
 
-impl anchor_lang::Id for Perpetuals {
-    fn id() -> Pubkey {
-        crate::ID
-    }
-}
 
-impl Perpetuals {
-    pub const LEN: usize = 8 + std::mem::size_of::<Perpetuals>();
-    pub const BPS_DECIMALS: u8 = 4;
-    pub const BPS_POWER: u128 = 10u64.pow(Self::BPS_DECIMALS as u32) as u128;
-    pub const PRICE_DECIMALS: u8 = 6;
-    pub const USD_DECIMALS: u8 = 6;
-    pub const LP_DECIMALS: u8 = Self::USD_DECIMALS;
-    pub const RATE_DECIMALS: u8 = 9;
-    pub const RATE_POWER: u128 = 10u64.pow(Self::RATE_DECIMALS as u32) as u128;
-
-    pub fn validate(&self) -> bool {
-        true
-    }
-
-    #[cfg(feature = "test")]
-    pub fn get_time(&self) -> Result<i64> {
-        Ok(self.inception_time)
-    }
-
-    #[cfg(not(feature = "test"))]
-    pub fn get_time(&self) -> Result<i64> {
-        let time = solana_program::sysvar::clock::Clock::get()?.unix_timestamp;
-        if time > 0 {
-            Ok(time)
-        } else {
-            Err(ProgramError::InvalidAccountData.into())
-        }
-    }
-
-    pub fn validate_upgrade_authority(
-        expected_upgrade_authority: Pubkey,
-        program_data: &AccountInfo,
-        program: &Program<crate::program::Perpetuals>,
-    ) -> Result<()> {
-        if let Some(programdata_address) = program.programdata_address()? {
-            require_keys_eq!(
-                programdata_address,
-                program_data.key(),
-                ErrorCode::InvalidProgramExecutable
-            );
-            let program_data: Account<ProgramData> = Account::try_from(program_data)?;
-            if let Some(current_upgrade_authority) = program_data.upgrade_authority_address {
-                if current_upgrade_authority != Pubkey::default() {
-                    require_keys_eq!(
-                        current_upgrade_authority,
-                        expected_upgrade_authority,
-                        ErrorCode::ConstraintOwner
-                    );
-                }
-            }
-        } // otherwise not upgradeable
-
-        Ok(())
-    }
-
-    pub fn transfer_tokens<'info>(
-        &self,
-        from: AccountInfo<'info>,
-        to: AccountInfo<'info>,
-        authority: AccountInfo<'info>,
-        token_program: AccountInfo<'info>,
-        amount: u64,
-    ) -> Result<()> {
-        let authority_seeds: &[&[&[u8]]] =
-            &[&[b"transfer_authority", &[self.transfer_authority_bump]]];
-
-        let context = CpiContext::new(
-            token_program,
-            Transfer {
-                from,
-                to,
-                authority,
-            },
-        )
-        .with_signer(authority_seeds);
-
-        anchor_spl::token::transfer(context, amount)
-    }
-
-    pub fn transfer_tokens_from_user<'info>(
-        &self,
-        from: AccountInfo<'info>,
-        to: AccountInfo<'info>,
-        authority: AccountInfo<'info>,
-        token_program: AccountInfo<'info>,
-        amount: u64,
-    ) -> Result<()> {
-        let context = CpiContext::new(
-            token_program,
-            Transfer {
-                from,
-                to,
-                authority,
-            },
-        );
-        anchor_spl::token::transfer(context, amount)
-    }
-
-    pub fn mint_tokens<'info>(
-        &self,
-        mint: AccountInfo<'info>,
-        to: AccountInfo<'info>,
-        authority: AccountInfo<'info>,
-        token_program: AccountInfo<'info>,
-        amount: u64,
-    ) -> Result<()> {
-        let authority_seeds: &[&[&[u8]]] =
-            &[&[b"transfer_authority", &[self.transfer_authority_bump]]];
-
-        let context = CpiContext::new(
-            token_program,
-            MintTo {
-                mint,
-                to,
-                authority,
-            },
-        )
-        .with_signer(authority_seeds);
-
-        anchor_spl::token::mint_to(context, amount)
-    }
-
-    pub fn burn_tokens<'info>(
-        &self,
-        mint: AccountInfo<'info>,
-        from: AccountInfo<'info>,
-        authority: AccountInfo<'info>,
-        token_program: AccountInfo<'info>,
-        amount: u64,
-    ) -> Result<()> {
-        let context = CpiContext::new(
-            token_program,
-            Burn {
-                mint,
-                from,
-                authority,
-            },
-        );
-
-        anchor_spl::token::burn(context, amount)
-    }
-
-    pub fn is_empty_account(account_info: &AccountInfo) -> Result<bool> {
-        Ok(account_info.try_data_is_empty()? || account_info.try_lamports()? == 0)
-    }
-
-    pub fn close_token_account<'info>(
-        receiver: AccountInfo<'info>,
-        token_account: AccountInfo<'info>,
-        token_program: AccountInfo<'info>,
-        authority: AccountInfo<'info>,
-        seeds: &[&[&[u8]]],
-    ) -> Result<()> {
-        let cpi_accounts = anchor_spl::token::CloseAccount {
-            account: token_account,
-            destination: receiver,
-            authority,
+impl PerpPosition {
+    pub const LEN: usize = 8 + 32 + 32 + 32 + 32 + 1 + 8 + 32 + 8 + 8 + 8 + 8 + 8 + 8 + 8 + 8 + 1 + 1 + 32; // Updated size
+    
+    pub const MAX_LEVERAGE: f64 = 100.0;
+    pub const LIQUIDATION_THRESHOLD: f64 = 0.005; // 0.5% margin ratio triggers liquidation
+    pub const MAINTENANCE_MARGIN: f64 = 0.10;    // 10% minimum margin ratio
+    
+    pub fn update_position(&mut self, current_price: f64, current_time: i64, collateral_price: f64) -> Result<()> {
+        // Calculate unrealized P&L in USD
+        // P&L = (price_diff / entry_price) * position_value * leverage
+        let price_diff = match self.side {
+            PerpSide::Long => current_price - self.entry_price,
+            PerpSide::Short => self.entry_price - current_price,
         };
-        let cpi_context = anchor_lang::context::CpiContext::new(token_program, cpi_accounts);
-
-        anchor_spl::token::close_account(cpi_context.with_signer(seeds))
-    }
-
-    pub fn transfer_sol_from_owned<'a>(
-        program_owned_source_account: AccountInfo<'a>,
-        destination_account: AccountInfo<'a>,
-        amount: u64,
-    ) -> Result<()> {
-        **destination_account.try_borrow_mut_lamports()? = destination_account
-            .try_lamports()?
-            .checked_add(amount)
-            .ok_or(ProgramError::InsufficientFunds)?;
-
-        let source_balance = program_owned_source_account.try_lamports()?;
-        **program_owned_source_account.try_borrow_mut_lamports()? = source_balance
-            .checked_sub(amount)
-            .ok_or(ProgramError::InsufficientFunds)?;
-
-        Ok(())
-    }
-
-    pub fn transfer_sol<'a>(
-        source_account: AccountInfo<'a>,
-        destination_account: AccountInfo<'a>,
-        system_program: AccountInfo<'a>,
-        amount: u64,
-    ) -> Result<()> {
-        let cpi_accounts = anchor_lang::system_program::Transfer {
-            from: source_account,
-            to: destination_account,
-        };
-        let cpi_context = anchor_lang::context::CpiContext::new(system_program, cpi_accounts);
-
-        anchor_lang::system_program::transfer(cpi_context, amount)
-    }
-
-    pub fn realloc<'a>(
-        funding_account: AccountInfo<'a>,
-        target_account: AccountInfo<'a>,
-        system_program: AccountInfo<'a>,
-        new_len: usize,
-        zero_init: bool,
-    ) -> Result<()> {
-        let new_minimum_balance = Rent::get()?.minimum_balance(new_len);
-        let lamports_diff = new_minimum_balance.saturating_sub(target_account.try_lamports()?);
-
-        Perpetuals::transfer_sol(
-            funding_account,
-            target_account.clone(),
-            system_program,
-            lamports_diff,
+        
+        let position_value_usd = self.position_size as f64 / 1_000_000_000.0;
+        
+        let pnl_ratio = math::checked_float_div(price_diff, self.entry_price)?;
+        let unrealized_pnl_usd = math::checked_float_mul(pnl_ratio, position_value_usd)?;
+        
+        self.unrealized_pnl = (unrealized_pnl_usd * 1_000_000.0) as i64; // Store as micro-USD
+        
+        // Update margin ratio
+        let collateral_decimals = if self.collateral_asset == self.sol_custody { 9 } else { 6 };
+        let collateral_value_usd = math::checked_float_mul(
+            self.collateral_amount as f64 / math::checked_powi(10.0, collateral_decimals)?,
+            collateral_price
         )?;
-
-        target_account
-            .realloc(new_len, zero_init)
-            .map_err(|_| ProgramError::InvalidRealloc.into())
+        
+        let current_equity = collateral_value_usd + unrealized_pnl_usd;
+        self.margin_ratio = math::checked_float_div(current_equity, position_value_usd)?;
+        
+        self.last_update_time = current_time;
+        
+        Ok(())
     }
 }

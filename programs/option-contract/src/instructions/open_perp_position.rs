@@ -1,7 +1,7 @@
 use crate::{
     errors::OptionError,
     math,
-    state::{Contract, Custody, OraclePrice, Pool, User, OptionDetail},
+    state::{Contract, Custody, OraclePrice, Pool, User, OptionDetail, PerpPosition, PerpSide},
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer as SplTransfer};
@@ -15,78 +15,6 @@ pub struct OpenPerpPositionParams {
     pub pool_name: String,       // Pool name (e.g., "SOL/USDC")
     pub pay_sol: bool,           // true = pay with SOL, false = pay with USDC
     pub pay_amount: u64,
-}
-
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq)]
-pub enum PerpSide {
-    Long,  // Betting SOL price goes up
-    Short, // Betting SOL price goes down
-}
-
-#[account]
-pub struct PerpPosition {
-    pub owner: Pubkey,
-    pub pool: Pubkey,
-    pub sol_custody: Pubkey,
-    pub usdc_custody: Pubkey,
-    
-    // Position details
-    pub side: PerpSide,
-    pub collateral_amount: u64,    // Collateral amount in the collateral asset
-    pub collateral_asset: Pubkey,  // Which asset is used as collateral (SOL or USDC custody)
-    pub position_size: u64,        // SOL position size
-    pub leverage: f64,             // Calculated leverage
-    pub entry_price: f64,          // SOL price when opened
-    pub liquidation_price: f64,    // Price at which position gets liquidated
-    
-    // Tracking
-    pub open_time: i64,
-    pub last_update_time: i64,
-    pub unrealized_pnl: i64,       // Positive or negative P&L in USD
-    
-    // Risk management
-    pub margin_ratio: f64,         // Current margin ratio
-    pub is_liquidated: bool,
-    
-    pub bump: u8,
-}
-
-impl PerpPosition {
-    pub const LEN: usize = 8 + 32 + 32 + 32 + 32 + 1 + 8 + 32 + 8 + 8 + 8 + 8 + 8 + 8 + 8 + 8 + 1 + 1 + 32; // Updated size
-    
-    pub const MAX_LEVERAGE: f64 = 100.0;
-    pub const LIQUIDATION_THRESHOLD: f64 = 0.005; // 0.5% margin ratio triggers liquidation
-    pub const MAINTENANCE_MARGIN: f64 = 0.10;    // 10% minimum margin ratio
-    
-    pub fn update_position(&mut self, current_price: f64, current_time: i64, collateral_price: f64) -> Result<()> {
-        // Calculate unrealized P&L in USD
-        // P&L = (price_diff / entry_price) * position_value * leverage
-        let price_diff = match self.side {
-            PerpSide::Long => current_price - self.entry_price,
-            PerpSide::Short => self.entry_price - current_price,
-        };
-        
-        let position_value_usd = self.position_size as f64 / 1_000_000_000.0;
-        
-        let pnl_ratio = math::checked_float_div(price_diff, self.entry_price)?;
-        let unrealized_pnl_usd = math::checked_float_mul(pnl_ratio, position_value_usd)?;
-        
-        self.unrealized_pnl = (unrealized_pnl_usd * 1_000_000.0) as i64; // Store as micro-USD
-        
-        // Update margin ratio
-        let collateral_decimals = if self.collateral_asset == self.sol_custody { 9 } else { 6 };
-        let collateral_value_usd = math::checked_float_mul(
-            self.collateral_amount as f64 / math::checked_powi(10.0, collateral_decimals)?,
-            collateral_price
-        )?;
-        
-        let current_equity = collateral_value_usd + unrealized_pnl_usd;
-        self.margin_ratio = math::checked_float_div(current_equity, position_value_usd)?;
-        
-        self.last_update_time = current_time;
-        
-        Ok(())
-    }
 }
 
 pub fn open_perp_position(
@@ -230,7 +158,11 @@ pub fn open_perp_position(
             ctx.accounts.token_program.to_account_info(),
             SplTransfer {
                 from: ctx.accounts.funding_account.to_account_info(),
-                to: collateral_token_account.to_account_info(),
+                to: if params.pay_sol {
+                    ctx.accounts.sol_custody_token_account.to_account_info()
+                } else {
+                    ctx.accounts.usdc_custody_token_account.to_account_info()
+                },
                 authority: owner.to_account_info(),
             },
         ),
@@ -367,7 +299,7 @@ pub struct OpenPerpPosition<'info> {
         init_if_needed,
         payer = owner,
         space = User::LEN,
-        seeds = [b"user_v2", owner.key().as_ref()],
+        seeds = [b"user", owner.key().as_ref()],
         bump,
     )]
     pub user: Box<Account<'info, User>>,

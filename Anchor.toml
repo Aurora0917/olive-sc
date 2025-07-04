@@ -5,7 +5,7 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-option_contract = "GSmqNhxAhrLJjcxd9G2ts3obF9va9QBRezm6PMQJuE9b"
+option_contract = "Gz4U6LcbehnjbuhVXEFEAAomXHuQPU4TrwYyR56NPGnc"
 
 [registry]
 url = "https://api.apr.dev"
