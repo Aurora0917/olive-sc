@@ -42,7 +42,6 @@ pub fn edit_option(ctx: Context<EditOption>, params: &EditOptionParams) -> Resul
     // Validation checks
     require!(option_detail.valid, OptionError::OptionExpired);
     require_keys_eq!(option_detail.owner, owner.key());
-    require_keys_eq!(option_detail.premium_asset, pay_custody.key());
     require_keys_eq!(option_detail.locked_asset, locked_custody.key());
     require_gte!(user.option_index, params.option_index);
 
