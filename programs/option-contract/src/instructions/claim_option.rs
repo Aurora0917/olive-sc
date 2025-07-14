@@ -1,5 +1,5 @@
 use crate::{
-    errors::OptionError,
+    errors::TradingError,
     math, 
     state::{Contract, Custody, OptionDetail, Pool, User}
 };
@@ -26,37 +26,37 @@ pub fn claim_option(ctx: Context<ClaimOption>, params: &ClaimOptionParams) -> Re
     let _locked_oracle = &ctx.accounts.locked_oracle;
     let funding_account = &mut ctx.accounts.funding_account;
 
-    // ✅ VALIDATION CHECKS
+    // VALIDATION CHECKS
     require_gte!(user.option_index, params.option_index);
     
-    // ✅ Verify option belongs to caller
+    // Verify option belongs to caller
     require_eq!(
         option_detail.owner,
         ctx.accounts.owner.key(),
-        OptionError::InvalidOwner
+        TradingError::InvalidOwner
     );
     
-    // ✅ Option must be invalid (exercised/expired)
+    // Option must be invalid (exercised/expired)
     require_eq!(option_detail.valid, false);
     
-    // ✅ Must have claimable amount
+    // Must have claimable amount
     require_gt!(option_detail.claimed, 0);
 
-    // ✅ Check custody has enough available tokens (owned - locked)
+    // Check custody has enough available tokens (owned - locked)
     require_gte!(
         math::checked_sub(locked_custody.token_owned, locked_custody.token_locked)?, 
         option_detail.claimed
     );
 
-    // ✅ Update custody balance
+    // Update custody balance
     locked_custody.token_owned = math::checked_sub(locked_custody.token_owned, option_detail.claimed)?;
     
-    // ✅ Set profit and reset claimed
+    // Set profit and reset claimed
     option_detail.profit = option_detail.claimed;
     let claim_amount = option_detail.claimed;
     option_detail.claimed = 0;
 
-    // ✅ FIXED: Use actual custody token account, not oracle
+    // Use actual custody token account, not oracle
     contract.transfer_tokens(
         locked_custody_token_account.to_account_info(),
         funding_account.to_account_info(),
@@ -100,7 +100,7 @@ pub struct ClaimOption<'info> {
     )]
     pub pool: Box<Account<'info, Pool>>,
 
-    // ✅ CRITICAL FIX: MOVE ALL MINTS TO TOP BEFORE DEPENDENT ACCOUNTS
+    // MOVE ALL MINTS TO TOP BEFORE DEPENDENT ACCOUNTS
     #[account(mut)]
     pub custody_mint: Box<Account<'info, Mint>>,
     
@@ -122,9 +122,9 @@ pub struct ClaimOption<'info> {
     )]
     pub custody: Box<Account<'info, Custody>>, // Target price asset
 
-    // ✅ CRITICAL FIX: Add `mut` to option_detail!
+    // Add `mut` to option_detail!
     #[account(
-        mut,  // ✅ THIS WAS MISSING! Without this, changes aren't saved!
+        mut,  // Without this, changes aren't saved!
         seeds = [b"option", owner.key().as_ref(), 
                 params.option_index.to_le_bytes().as_ref(),
                 pool.key().as_ref(), custody.key().as_ref()],
@@ -138,19 +138,19 @@ pub struct ClaimOption<'info> {
                  pool.key().as_ref(),
                  locked_custody_mint.key().as_ref()],
         bump = locked_custody.bump,
-        constraint = locked_custody.mint == locked_custody_mint.key() @ OptionError::InvalidMintError
+        constraint = locked_custody.mint == locked_custody_mint.key() @ TradingError::InvalidMintError
     )]
     pub locked_custody: Box<Account<'info, Custody>>, // locked asset
 
-    // ✅ FIXED: Add the actual token account for transfers
+    // Add the actual token account for transfers
     #[account(
         mut,
         seeds = [b"custody_token_account",
                  pool.key().as_ref(),
                  locked_custody_mint.key().as_ref()],
         bump,
-        constraint = locked_custody_token_account.mint == locked_custody_mint.key() @ OptionError::InvalidMintError,
-        constraint = funding_account.mint == locked_custody_mint.key() @ OptionError::InvalidMintError
+        constraint = locked_custody_token_account.mint == locked_custody_mint.key() @ TradingError::InvalidMintError,
+        constraint = funding_account.mint == locked_custody_mint.key() @ TradingError::InvalidMintError
     )]
     pub locked_custody_token_account: Box<Account<'info, TokenAccount>>,
 

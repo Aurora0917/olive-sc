@@ -32,11 +32,15 @@ pub struct OptionDetail {
     // NEW FIELD
     pub entry_price: u64,     // Underlying asset price when option was purchased (scaled by 1e6)
     pub last_update_time: i64, // Last time option was updated
+    
+    // TP/SL FIELDS
+    pub take_profit_price: Option<u64>,  // Take profit price (scaled by 1e6)
+    pub stop_loss_price: Option<u64>,    // Stop loss price (scaled by 1e6)
 }
 
 impl OptionDetail {
-    // Updated length calculation: added 8 bytes for entry_price (u64) + 8 bytes for last_update_time (i64)
-    pub const LEN: usize = 8 * 15 + 4 + 32 * 5 + 8;
+    // Updated length calculation: added 8 bytes for entry_price (u64) + 8 bytes for last_update_time (i64) + 18 bytes for TP/SL (Option<u64> * 2)
+    pub const LEN: usize = 8 * 15 + 4 + 32 * 5 + 8 + 18;
 
     pub fn normal_cdf(z: f64) -> f64 {
         let beta1 = -0.0004406;
@@ -207,6 +211,48 @@ impl OptionDetail {
                 current_price <= (self.limit_price as f64 / 1_000_000.0)
             };
 
+            if should_execute {
+                self.executed = true;
+                self.exercised = current_time as u64;
+            }
+        }
+
+        // Check TP/SL conditions for automatic execution
+        if self.valid && !self.executed {
+            let mut should_execute = false;
+            
+            // Check take profit
+            if let Some(tp_price) = self.take_profit_price {
+                let tp_price_f64 = tp_price as f64 / 1_000_000.0;
+                if self.option_type == 0 { // Call option
+                    // For calls, take profit when underlying price goes above TP
+                    if current_price >= tp_price_f64 {
+                        should_execute = true;
+                    }
+                } else { // Put option
+                    // For puts, take profit when underlying price goes below TP
+                    if current_price <= tp_price_f64 {
+                        should_execute = true;
+                    }
+                }
+            }
+            
+            // Check stop loss
+            if let Some(sl_price) = self.stop_loss_price {
+                let sl_price_f64 = sl_price as f64 / 1_000_000.0;
+                if self.option_type == 0 { // Call option
+                    // For calls, stop loss when underlying price goes below SL
+                    if current_price <= sl_price_f64 {
+                        should_execute = true;
+                    }
+                } else { // Put option
+                    // For puts, stop loss when underlying price goes above SL
+                    if current_price >= sl_price_f64 {
+                        should_execute = true;
+                    }
+                }
+            }
+            
             if should_execute {
                 self.executed = true;
                 self.exercised = current_time as u64;

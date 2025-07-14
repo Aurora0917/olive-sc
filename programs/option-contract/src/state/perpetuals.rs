@@ -1,176 +1,229 @@
 use crate::{
-    errors::TradingError,
-    math::{self, f64_to_scaled_price, scaled_price_to_f64, f64_to_scaled_ratio},
+    math::{self},
 };
 use anchor_lang::prelude::*;
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq)]
-pub enum PerpSide {
-    Long,  // Betting SOL price goes up
-    Short, // Betting SOL price goes down
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Debug)]
+pub enum Side {
+    Long,
+    Short,
+}
+
+impl Default for Side {
+    fn default() -> Self {
+        Self::Long
+    }
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Debug)]
+pub enum PositionType {
+    Market,     // Market position (immediate execution)
+    Limit,      // Limit order (pending execution)
+}
+
+impl Default for PositionType {
+    fn default() -> Self {
+        Self::Market
+    }
 }
 
 #[account]
-pub struct PerpPosition {
+#[derive(Default, Debug)]
+pub struct Position {
+    // Identity & References
     pub owner: Pubkey,
     pub pool: Pubkey,
-    pub sol_custody: Pubkey,
-    pub usdc_custody: Pubkey,
+    pub custody: Pubkey,                     // Position asset (e.g., SOL)
+    pub collateral_custody: Pubkey,          // Collateral asset (e.g., USDC)
     
-    // Position details
-    pub side: PerpSide,
-    pub collateral_amount: u64,    // Collateral amount in the collateral asset
-    pub collateral_asset: Pubkey,  // Which asset is used as collateral (SOL or USDC custody)
-    pub position_size: u64,        // SOL position size
-    pub leverage: u64,             // Calculated leverage (scaled by 1e6)
-    pub entry_price: u64,          // SOL price when opened (scaled by 1e6)
-    pub liquidation_price: u64,    // Price at which position gets liquidated (scaled by 1e6)
-    
-    // Tracking
-    pub open_time: i64,
-    pub last_update_time: i64,
-    pub unrealized_pnl: i64,       // Positive or negative P&L in USD
-    
-    // Risk management
-    pub margin_ratio: u64,         // Current margin ratio (scaled by 1e6)
+    // Position Type & Status
+    pub position_type: PositionType,         // Market or Limit
+    pub side: Side,
     pub is_liquidated: bool,
     
-    // TP/SL Orders
-    pub take_profit_price: Option<u64>,  // Take profit trigger price (scaled by 1e6)
-    pub stop_loss_price: Option<u64>,    // Stop loss trigger price (scaled by 1e6)
-    pub tp_sl_enabled: bool,             // Whether TP/SL is active
+    // Core Position Data
+    pub price: u64,                          // Entry price (scaled) - for limit: trigger price
+    pub size_usd: u64,                       // Position size in USD
+    pub borrow_size_usd: u64,               // Borrowed amount in USD
+    pub collateral_usd: u64,                // Collateral value in USD at open
+    pub open_time: i64,
+    pub update_time: i64,                   // Track updates
+    
+    // Risk Management (Set at open, used for liquidation)
+    pub liquidation_price: u64,              // Pre-calculated for efficiency
+    pub initial_margin_bps: u64,            // e.g., 400 = 4% for 250x leverage
+    pub maintenance_margin_bps: u64,        // e.g., 200 = 2% for liquidation
+    
+    // Funding & Interest Tracking
+    pub cumulative_interest_snapshot: u128,  // Pool's cumulative at position open
+    pub cumulative_funding_snapshot: u128,   // Pool's funding at position open
+    
+    // Fee Tracking
+    pub total_fees_paid: u64,               // All fees paid
+    pub opening_fee_paid: u64,              // Opening fee
+    
+    // Asset Amounts (For settlement)
+    pub locked_amount: u64,                  // Locked in pool
+    pub collateral_amount: u64,             // Actual collateral tokens
+    
+    // TP/SL Storage (Store on-chain, backend checks & executes)
+    pub take_profit_price: Option<u64>,     // Backend monitors, executes when hit
+    pub stop_loss_price: Option<u64>,       // Backend monitors, executes when hit
+    
+    // Limit Order (for limit perp)
+    pub trigger_price: Option<u64>,         // Price to execute limit order
+    pub trigger_above_threshold: bool,      // true = execute when price >= trigger
     
     pub bump: u8,
 }
 
 
-impl PerpPosition {
-    pub const LEN: usize = 8 + 32 + 32 + 32 + 32 + 1 + 8 + 32 + 8 + 8 + 8 + 8 + 8 + 8 + 8 + 8 + 1 + 1 + 8 + 8 + 1 + 1 + 32; // Added TP/SL fields
+impl Position {
+    pub const LEN: usize = 8 + std::mem::size_of::<Position>();
     
-    pub const MAX_LEVERAGE: u64 = 100 * crate::math::PRICE_SCALE; // 100.0 scaled
-    pub const LIQUIDATION_THRESHOLD: u64 = 5_000; // 0.5% margin ratio triggers liquidation (scaled by 1e6)
-    pub const MAINTENANCE_MARGIN: u64 = 100_000; // 10% minimum margin ratio (scaled by 1e6)
+    // 250x leverage = 0.4% initial margin
+    pub const MAX_LEVERAGE: u64 = 250;
+    pub const MIN_INITIAL_MARGIN_BPS: u64 = 40; // 0.4% for 250x leverage
+    pub const LIQUIDATION_MARGIN_BPS: u64 = 20; // 0.2% liquidation threshold
     
-    pub fn update_position(&mut self, current_price: f64, current_time: i64, collateral_price: f64) -> Result<()> {
-        // Convert f64 inputs to scaled format for calculations
-        let _current_price_scaled = f64_to_scaled_price(current_price)?;
-        let _collateral_price_scaled = f64_to_scaled_price(collateral_price)?;
+    pub fn get_initial_leverage(&self) -> Result<u64> {
+        if self.collateral_usd == 0 {
+            return Ok(0);
+        }
+        math::checked_as_u64(math::checked_div(
+            self.size_usd as u128,
+            self.collateral_usd as u128,
+        )?)
+    }
+    
+    pub fn update_position(
+        &mut self,
+        new_size_usd: Option<u64>,
+        new_collateral_usd: Option<u64>,
+        new_collateral_amount: Option<u64>,
+        current_time: i64,
+    ) -> Result<()> {
+        if let Some(size) = new_size_usd {
+            self.size_usd = size;
+        }
         
-        // Convert stored scaled values back to f64 for legacy calculations
-        let entry_price_f64 = scaled_price_to_f64(self.entry_price)?;
+        if let Some(collateral_usd) = new_collateral_usd {
+            self.collateral_usd = collateral_usd;
+        }
         
-        // Calculate unrealized P&L in USD
-        // P&L = (price_diff / entry_price) * position_value * leverage
-        let price_diff = match self.side {
-            PerpSide::Long => current_price - entry_price_f64,
-            PerpSide::Short => entry_price_f64 - current_price,
+        if let Some(collateral_amount) = new_collateral_amount {
+            self.collateral_amount = collateral_amount;
+        }
+        
+        self.update_time = current_time;
+        Ok(())
+    }
+    
+    pub fn update_tp_sl(
+        &mut self,
+        take_profit: Option<u64>,
+        stop_loss: Option<u64>,
+    ) -> Result<()> {
+        self.take_profit_price = take_profit;
+        self.stop_loss_price = stop_loss;
+        Ok(())
+    }
+
+    pub fn should_execute_limit_order(&self, current_price: u64) -> bool {
+        if self.position_type != PositionType::Limit {
+            return false;
+        }
+        
+        if let Some(trigger_price) = self.trigger_price {
+            if self.trigger_above_threshold {
+                current_price >= trigger_price
+            } else {
+                current_price <= trigger_price
+            }
+        } else {
+            false
+        }
+    }
+    
+    pub fn execute_limit_order(&mut self, execution_price: u64, current_time: i64) -> Result<()> {
+        self.position_type = PositionType::Market;
+        self.price = execution_price;
+        self.trigger_price = None;
+        self.open_time = current_time;
+        self.update_time = current_time;
+        Ok(())
+    }
+
+    pub fn is_liquidatable(&self, current_price: u64) -> bool {
+        if self.position_type == PositionType::Limit {
+            return false; // Can't liquidate limit orders
+        }
+        
+        match self.side {
+            Side::Long => current_price <= self.liquidation_price,
+            Side::Short => current_price >= self.liquidation_price,
+        }
+    }
+    
+    pub fn is_liquidatable_by_margin(&self, current_price: u64) -> Result<bool> {
+        if self.position_type == PositionType::Limit {
+            return Ok(false);
+        }
+        
+        let pnl = self.calculate_pnl(current_price)?;
+        let current_equity = if pnl >= 0 {
+            self.collateral_usd + pnl as u64
+        } else {
+            let loss = (-pnl) as u64;
+            if loss >= self.collateral_usd {
+                0
+            } else {
+                self.collateral_usd - loss
+            }
         };
         
-        let position_value_usd = self.position_size as f64 / 1_000_000_000.0;
+        let margin_ratio_bps = math::checked_as_u64(math::checked_div(
+            math::checked_mul(current_equity as u128, 10_000u128)?,
+            self.size_usd as u128,
+        )?)?;
         
-        let pnl_ratio = math::checked_float_div(price_diff, entry_price_f64)?;
-        let unrealized_pnl_usd = math::checked_float_mul(pnl_ratio, position_value_usd)?;
+        Ok(margin_ratio_bps <= self.maintenance_margin_bps)
+    }
+    
+    pub fn calculate_pnl(&self, current_price: u64) -> Result<i64> {
+        let price_diff = match self.side {
+            Side::Long => current_price as i64 - self.price as i64,
+            Side::Short => self.price as i64 - current_price as i64,
+        };
         
-        self.unrealized_pnl = (unrealized_pnl_usd * 1_000_000.0) as i64; // Store as micro-USD
-        
-        // Update margin ratio using scaled arithmetic where possible
-        let collateral_decimals = if self.collateral_asset == self.sol_custody { 9 } else { 6 };
-        let collateral_value_usd = math::checked_float_mul(
-            self.collateral_amount as f64 / math::checked_powi(10.0, collateral_decimals)?,
-            collateral_price
+        let pnl = math::checked_div(
+            math::checked_mul(price_diff as i128, self.size_usd as i128)?,
+            self.price as i128,
         )?;
         
-        let current_equity = collateral_value_usd + unrealized_pnl_usd;
-        let margin_ratio_f64 = math::checked_float_div(current_equity, position_value_usd)?;
-        
-        // Convert margin ratio back to scaled format for storage
-        self.margin_ratio = f64_to_scaled_ratio(margin_ratio_f64)?;
-        
-        self.last_update_time = current_time;
-        
-        Ok(())
+        Ok(pnl as i64)
     }
-
-    // TP/SL Management
-    pub fn set_tp_sl(&mut self, take_profit: Option<f64>, stop_loss: Option<f64>) -> Result<()> {
-        // Convert stored entry_price back to f64 for validation
-        let entry_price_f64 = scaled_price_to_f64(self.entry_price)?;
+    
+    pub fn calculate_funding_payment(&self, current_cumulative_funding: u128) -> Result<i64> {
+        let funding_diff = current_cumulative_funding - self.cumulative_funding_snapshot;
+        let funding_payment = math::checked_mul(
+            funding_diff as i128,
+            self.size_usd as i128,
+        )?;
         
-        // Validate TP/SL prices
-        if let Some(tp) = take_profit {
-            match self.side {
-                PerpSide::Long => {
-                    require!(tp > entry_price_f64, TradingError::InvalidTakeProfitPrice);
-                },
-                PerpSide::Short => {
-                    require!(tp < entry_price_f64, TradingError::InvalidTakeProfitPrice);
-                }
-            }
-        }
-
-        if let Some(sl) = stop_loss {
-            match self.side {
-                PerpSide::Long => {
-                    require!(sl < entry_price_f64, TradingError::InvalidStopLossPrice);
-                },
-                PerpSide::Short => {
-                    require!(sl > entry_price_f64, TradingError::InvalidStopLossPrice);
-                }
-            }
-        }
-
-        // Convert f64 inputs to scaled u64 for storage
-        self.take_profit_price = if let Some(tp) = take_profit {
-            Some(f64_to_scaled_price(tp)?)
-        } else {
-            None
+        let final_payment = match self.side {
+            Side::Long => funding_payment,
+            Side::Short => -funding_payment,
         };
         
-        self.stop_loss_price = if let Some(sl) = stop_loss {
-            Some(f64_to_scaled_price(sl)?)
-        } else {
-            None
-        };
-        
-        self.tp_sl_enabled = take_profit.is_some() || stop_loss.is_some();
-
-        msg!("TP/SL set - TP: {:?}, SL: {:?}", take_profit, stop_loss);
-        Ok(())
+        Ok(final_payment as i64)
     }
-
-    pub fn should_execute_tp_sl(&self, current_price: f64) -> Option<&str> {
-        if !self.tp_sl_enabled {
-            return None;
-        }
-
-        // Check take profit
-        if let Some(tp_price_scaled) = self.take_profit_price {
-            // Convert scaled TP price back to f64 for comparison
-            if let Ok(tp_price_f64) = scaled_price_to_f64(tp_price_scaled) {
-                let should_execute = match self.side {
-                    PerpSide::Long => current_price >= tp_price_f64,
-                    PerpSide::Short => current_price <= tp_price_f64,
-                };
-                if should_execute {
-                    return Some("take_profit");
-                }
-            }
-        }
-
-        // Check stop loss
-        if let Some(sl_price_scaled) = self.stop_loss_price {
-            // Convert scaled SL price back to f64 for comparison
-            if let Ok(sl_price_f64) = scaled_price_to_f64(sl_price_scaled) {
-                let should_execute = match self.side {
-                    PerpSide::Long => current_price <= sl_price_f64,
-                    PerpSide::Short => current_price >= sl_price_f64,
-                };
-                if should_execute {
-                    return Some("stop_loss");
-                }
-            }
-        }
-
-        None
+    
+    pub fn calculate_interest_payment(&self, current_cumulative_interest: u128) -> Result<u64> {
+        let interest_diff = current_cumulative_interest - self.cumulative_interest_snapshot;
+        math::checked_as_u64(math::checked_mul(
+            interest_diff as u128,
+            self.borrow_size_usd as u128,
+        )?)
     }
 }

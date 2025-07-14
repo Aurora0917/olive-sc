@@ -1,5 +1,5 @@
 use crate::{
-    errors::OptionError,
+    errors::{OptionError, TradingError},
     math::{self, scaled_price_to_f64},
     state::{Contract, Custody, OptionDetail, OraclePrice, Pool, User},
 };
@@ -28,27 +28,27 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, params: &ExerciseOptionPara
     let locked_oracle = &ctx.accounts.locked_oracle;
     let custody_oracle = &ctx.accounts.custody_oracle;
 
-    // ✅ CRITICAL VALIDATION CHECKS - Add these at the beginning
+    // CRITICAL VALIDATION CHECKS - Add these at the beginning
     require_gte!(user.option_index, params.option_index);
     
-    // ✅ Prevent re-exercising the same option
+    // Prevent re-exercising the same option
     require_eq!(
         option_detail.exercised,
         0,
         OptionError::OptionAlreadyExercised
     );
     
-    // ✅ Ensure option is still valid
+    // Ensure option is still valid
     require!(
         option_detail.valid,
         OptionError::OptionNotValid
     );
     
-    // ✅ Verify option belongs to caller
+    // Verify option belongs to caller
     require_eq!(
         option_detail.owner,
         ctx.accounts.owner.key(),
-        OptionError::InvalidOwner
+        TradingError::InvalidOwner
     );
 
     // Current Unix timestamp
@@ -70,7 +70,7 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, params: &ExerciseOptionPara
     require_gte!(
         locked_custody.token_locked,
         option_detail.amount,
-        OptionError::InvalidLockedBalanceError
+        TradingError::InvalidLockedBalanceError
     );
 
     if custody.key() == locked_custody.key() {
@@ -104,7 +104,7 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, params: &ExerciseOptionPara
             -(custody.decimals as i32), // keep same precision
         )?;
 
-        // ✅ FIXED: Use the custody token account instead of custody metadata account
+        // Use the custody token account instead of custody metadata account
         contract.transfer_tokens(
             locked_custody_token_account.to_account_info(),
             funding_account.to_account_info(),
@@ -142,7 +142,7 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, params: &ExerciseOptionPara
             -(locked_custody.decimals as i32), // keep same precision
         )?;
 
-        // ✅ FIXED: Use the custody token account instead of custody metadata account
+        // Use the custody token account instead of custody metadata account
         contract.transfer_tokens(
             locked_custody_token_account.to_account_info(),
             funding_account.to_account_info(),
@@ -154,11 +154,11 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, params: &ExerciseOptionPara
         option_detail.profit = profit_per_unit;
     }
 
-    // ✅ Mark option as exercised and invalid (these changes will now be saved!)
+    // Mark option as exercised and invalid (these changes will now be saved!)
     option_detail.exercised = current_timestamp as u64;
     option_detail.valid = false;
 
-    // ✅ Update locked custody balance
+    // Update locked custody balance
     locked_custody.token_locked =
         math::checked_sub(locked_custody.token_locked, option_detail.amount)?;
 
@@ -197,14 +197,14 @@ pub struct ExerciseOption<'info> {
     )]
     pub pool: Box<Account<'info, Pool>>,
 
-    // ✅ CRITICAL FIX: MOVE ALL MINTS TO TOP BEFORE DEPENDENT ACCOUNTS
+    // MOVE ALL MINTS TO TOP BEFORE DEPENDENT ACCOUNTS
     #[account(mut)]
     pub custody_mint: Box<Account<'info, Mint>>,
     
     #[account(mut)]
     pub locked_custody_mint: Box<Account<'info, Mint>>,
 
-    // ✅ NOW these accounts can derive correctly with mints available
+    // NOW these accounts can derive correctly with mints available
     #[account(
         mut,
         seeds = [b"custody",
@@ -220,9 +220,9 @@ pub struct ExerciseOption<'info> {
     )]
     pub user: Box<Account<'info, User>>,
 
-    // ✅ CRITICAL FIX: Add `mut` to option_detail!
+    // Add `mut` to option_detail!
     #[account(
-        mut,  // ✅ THIS WAS MISSING! Without this, changes aren't saved!
+        mut,  // Without this, changes aren't saved!
         seeds = [b"option", owner.key().as_ref(), 
                 params.option_index.to_le_bytes().as_ref(),
                 pool.key().as_ref(), custody.key().as_ref()],
@@ -236,18 +236,18 @@ pub struct ExerciseOption<'info> {
                  pool.key().as_ref(),
                  locked_custody_mint.key().as_ref()],
         bump = locked_custody.bump,
-        constraint = locked_custody.mint == locked_custody_mint.key() @ OptionError::InvalidMintError
+        constraint = locked_custody.mint == locked_custody_mint.key() @ TradingError::InvalidMintError
     )]
     pub locked_custody: Box<Account<'info, Custody>>,
 
-    // ✅ Token account can now be derived properly with mint available
+    // Token account can now be derived properly with mint available
     #[account(
         mut,
         seeds = [b"custody_token_account",
                  pool.key().as_ref(),
                  locked_custody_mint.key().as_ref()],
         bump,
-        constraint = locked_custody_token_account.mint == locked_custody_mint.key() @ OptionError::InvalidMintError,
+        constraint = locked_custody_token_account.mint == locked_custody_mint.key() @ TradingError::InvalidMintError,
     )]
     pub locked_custody_token_account: Box<Account<'info, TokenAccount>>,
 

@@ -1,7 +1,7 @@
 use crate::{
-    errors::OptionError,
-    math::{self, f64_to_scaled_ratio},
-    state::{Contract, Custody, OraclePrice, Pool, PerpPosition, PerpSide},
+    errors::{PerpetualError, TradingError},
+    math::{self, f64_to_scaled_price},
+    state::{Contract, Custody, OraclePrice, Pool, Position, Side, PositionType},
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
@@ -10,9 +10,9 @@ use anchor_spl::token::{Mint, Token, TokenAccount};
 pub struct ClosePerpPositionParams {
     pub position_index: u64,
     pub pool_name: String,
-    pub close_percentage: u8,    // 1-100: 100 = full close, <100 = partial close
-    pub min_price: f64,         // Slippage protection
-    pub receive_sol: bool,      // true = receive SOL, false = receive USDC
+    pub close_percentage: u8,        // 1-100: 100 = full close, <100 = partial close
+    pub min_price: f64,             // Slippage protection
+    pub receive_sol: bool,          // true = receive SOL, false = receive USDC
 }
 
 pub fn close_perp_position(
@@ -27,11 +27,12 @@ pub fn close_perp_position(
     let usdc_custody = &mut ctx.accounts.usdc_custody;
     
     // Validation
-    require_keys_eq!(position.owner, ctx.accounts.owner.key(), OptionError::Unauthorized);
-    require!(!position.is_liquidated, OptionError::PositionLiquidated);
+    require_keys_eq!(position.owner, ctx.accounts.owner.key(), TradingError::Unauthorized);
+    require!(!position.is_liquidated, PerpetualError::PositionLiquidated);
+    require!(position.position_type == PositionType::Market, PerpetualError::InvalidPositionType);
     require!(
         params.close_percentage > 0 && params.close_percentage <= 100, 
-        OptionError::InvalidAmount
+        TradingError::InvalidAmount
     );
     
     // Get current prices from oracles
@@ -49,25 +50,27 @@ pub fn close_perp_position(
     msg!("User chose to receive: {}", if params.receive_sol { "SOL" } else { "USDC" });
     
     // Slippage protection
+    let current_price_scaled = f64_to_scaled_price(current_sol_price)?;
+    let min_price_scaled = f64_to_scaled_price(params.min_price)?;
+    
     match position.side {
-        PerpSide::Long => require!(current_sol_price >= params.min_price, OptionError::PriceSlippage),
-        PerpSide::Short => require!(current_sol_price <= params.min_price, OptionError::PriceSlippage),
+        Side::Long => require!(current_price_scaled >= min_price_scaled, TradingError::PriceSlippage),
+        Side::Short => require!(current_price_scaled <= min_price_scaled, TradingError::PriceSlippage),
     }
     
-    let collateral_price = if position.collateral_asset == position.sol_custody {
-        current_sol_price
-    } else {
-        usdc_price_value
-    };
+    // Calculate P&L
+    let pnl = position.calculate_pnl(current_price_scaled)?;
     
-    position.update_position(current_sol_price, current_time, collateral_price)?;
+    // Calculate funding and interest payments
+    let funding_payment = position.calculate_funding_payment(0)?; // TODO: Get from pool
+    let interest_payment = position.calculate_interest_payment(0)?; // TODO: Get from pool
     
     // Calculate amounts to close (proportional to percentage)
     let close_ratio = params.close_percentage as f64 / 100.0;
-    let position_size_to_close = if is_full_close {
-        position.position_size
+    let size_usd_to_close = if is_full_close {
+        position.size_usd
     } else {
-        math::checked_as_u64(position.position_size as f64 * close_ratio)?
+        math::checked_as_u64(position.size_usd as f64 * close_ratio)?
     };
     
     let collateral_amount_to_close = if is_full_close {
@@ -76,135 +79,137 @@ pub fn close_perp_position(
         math::checked_as_u64(position.collateral_amount as f64 * close_ratio)?
     };
     
-    // Calculate P&L for the portion being closed
-    let total_pnl = position.unrealized_pnl;
+    let collateral_usd_to_close = if is_full_close {
+        position.collateral_usd
+    } else {
+        math::checked_as_u64(position.collateral_usd as f64 * close_ratio)?
+    };
+    
+    // Calculate P&L, funding, and interest for the portion being closed
     let pnl_for_closed_portion = if is_full_close {
-        total_pnl
+        pnl
     } else {
-        (total_pnl as f64 * close_ratio) as i64
+        (pnl as f64 * close_ratio) as i64
     };
     
-    msg!("Position size to close: {}", position_size_to_close);
-    msg!("Collateral to close: {}", collateral_amount_to_close);
-    msg!("P&L for closed portion: ${}", pnl_for_closed_portion as f64 / 1_000_000.0);
-    
-    // Calculate settlement amount in the original collateral asset
-    let collateral_to_return = if pnl_for_closed_portion >= 0 {
-        // Profit: return collateral + profit
-        math::checked_add(collateral_amount_to_close, pnl_for_closed_portion as u64 * 1_000)?
+    let funding_for_closed_portion = if is_full_close {
+        funding_payment
     } else {
-        // Loss: return collateral - loss (if any remaining)
-        let loss = (-pnl_for_closed_portion * 1_000) as u64;
-        if loss >= collateral_amount_to_close {
-            0 // Total loss
-        } else {
-            math::checked_sub(collateral_amount_to_close, loss)?
-        }
+        (funding_payment as f64 * close_ratio) as i64
     };
     
-    // Unlock locked tokens based on position side (same as before)
-    match position.side {
-        PerpSide::Long => {
-            // Unlock SOL tokens for long position
-            sol_custody.token_locked = math::checked_sub(sol_custody.token_locked, position_size_to_close)?;
-        },
-        PerpSide::Short => {
-            // Unlock USDC equivalent for short position
-            let position_value_usd = position_size_to_close as f64 / math::checked_powi(10.0, sol_custody.decimals as i32)?;
-            let usdc_to_unlock = math::checked_as_u64(
-                position_value_usd * math::checked_powi(10.0, usdc_custody.decimals as i32)?
-            )?;
-            usdc_custody.token_locked = math::checked_sub(usdc_custody.token_locked, usdc_to_unlock)?;
-        }
+    let interest_for_closed_portion = if is_full_close {
+        interest_payment
+    } else {
+        math::checked_as_u64(interest_payment as f64 * close_ratio)?
+    };
+    
+    msg!("Size USD to close: {}", size_usd_to_close);
+    msg!("Collateral amount to close: {}", collateral_amount_to_close);
+    msg!("P&L for closed portion: {}", pnl_for_closed_portion);
+    msg!("Funding for closed portion: {}", funding_for_closed_portion);
+    msg!("Interest for closed portion: {}", interest_for_closed_portion);
+    
+    // Calculate net settlement amount
+    let mut net_settlement = collateral_usd_to_close as i64 + pnl_for_closed_portion - funding_for_closed_portion - interest_for_closed_portion as i64;
+    
+    // Ensure settlement is not negative
+    if net_settlement < 0 {
+        net_settlement = 0;
     }
     
-    // Transfer settlement funds to user (if any) - use user's preference
-    if collateral_to_return > 0 {
-        let authority_bump = contract.transfer_authority_bump;
-        let signer_seeds: &[&[&[u8]]] = &[&[b"transfer_authority", &[authority_bump]]];
-        
-        let (from_account, to_account, settlement_amount) = if params.receive_sol {
-            // User wants to receive SOL
-            if position.collateral_asset == position.sol_custody {
-                // Same asset: direct transfer
-                (&ctx.accounts.sol_custody_token_account, &ctx.accounts.user_sol_account, (collateral_to_return as f64 / current_sol_price) as u64)
+    let settlement_usd = net_settlement as u64;
+    
+    // Calculate settlement amount in requested asset
+    let (settlement_amount, settlement_decimals) = if params.receive_sol {
+        let amount = math::checked_as_u64(settlement_usd as f64 / current_sol_price)?;
+        (amount, sol_custody.decimals)
+    } else {
+        let amount = math::checked_as_u64(settlement_usd as f64 / usdc_price_value)?;
+        (amount, usdc_custody.decimals)
+    };
+    
+    // Adjust for token decimals
+    let settlement_tokens = math::checked_as_u64(
+        settlement_amount as f64 * math::checked_powi(10.0, settlement_decimals as i32)?
+    )?;
+    
+    msg!("Settlement USD: {}", settlement_usd);
+    msg!("Settlement tokens: {}", settlement_tokens);
+    
+    // Transfer settlement to user
+    if settlement_tokens > 0 {
+        ctx.accounts.contract.transfer_tokens(
+            if params.receive_sol {
+                ctx.accounts.sol_custody_token_account.to_account_info()
             } else {
-                // Different asset: convert USDC to SOL equivalent
-                let usdc_amount = collateral_to_return;
-                let usdc_value_usd = usdc_amount as f64 / math::checked_powi(10.0, usdc_custody.decimals as i32)?;
-                let sol_amount = math::checked_as_u64(
-                    usdc_value_usd / current_sol_price * math::checked_powi(10.0, sol_custody.decimals as i32)?
-                )?;
-                (&ctx.accounts.sol_custody_token_account, &ctx.accounts.user_sol_account, sol_amount)
-            }
-        } else {
-            // User wants to receive USDC
-            if position.collateral_asset == position.usdc_custody {
-                // Same asset: direct transfer
-                (&ctx.accounts.usdc_custody_token_account, &ctx.accounts.user_usdc_account, (collateral_to_return as f64 / usdc_price_value) as u64)
-            } else {
-                // Different asset: convert SOL to USDC equivalent
-                let sol_amount = collateral_to_return;
-                let sol_value_usd = sol_amount as f64 / math::checked_powi(10.0, sol_custody.decimals as i32)?;
-                let usdc_amount = math::checked_as_u64(
-                    sol_value_usd / usdc_price_value * math::checked_powi(10.0, usdc_custody.decimals as i32)?
-                )?;
-                (&ctx.accounts.usdc_custody_token_account, &ctx.accounts.user_usdc_account, usdc_amount)
-            }
-        };
-        
-        anchor_spl::token::transfer(
-            CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
-                anchor_spl::token::Transfer {
-                    from: from_account.to_account_info(),
-                    to: to_account.to_account_info(),
-                    authority: ctx.accounts.transfer_authority.to_account_info(),
-                },
-                signer_seeds,
-            ),
-            settlement_amount,
+                ctx.accounts.usdc_custody_token_account.to_account_info()
+            },
+            ctx.accounts.receiving_account.to_account_info(),
+            ctx.accounts.transfer_authority.to_account_info(),
+            ctx.accounts.token_program.to_account_info(),
+            settlement_tokens,
         )?;
-        
-        msg!("Settlement amount transferred: {}", settlement_amount);
     }
     
-    // Update custody stats (based on original collateral)
-    if position.side == PerpSide::Long {
-        sol_custody.token_owned = math::checked_sub(sol_custody.token_owned, collateral_amount_to_close)?;
+    // Update custody stats
+    let locked_amount_to_release = if is_full_close {
+        position.locked_amount
     } else {
-        usdc_custody.token_owned = math::checked_sub(usdc_custody.token_owned, collateral_amount_to_close)?;
+        math::checked_as_u64(position.locked_amount as f64 * close_ratio)?
+    };
+    
+    if position.side == Side::Long {
+        sol_custody.token_locked = math::checked_sub(
+            sol_custody.token_locked,
+            locked_amount_to_release
+        )?;
+    } else {
+        usdc_custody.token_locked = math::checked_sub(
+            usdc_custody.token_locked,
+            locked_amount_to_release
+        )?;
     }
     
+    // Update custody ownership
+    if position.collateral_custody == sol_custody.key() {
+        sol_custody.token_owned = math::checked_sub(
+            sol_custody.token_owned,
+            collateral_amount_to_close
+        )?;
+    } else {
+        usdc_custody.token_owned = math::checked_sub(
+            usdc_custody.token_owned,
+            collateral_amount_to_close
+        )?;
+    }
+    
+    // Update or close position
     if is_full_close {
-        // Full close: Mark position as closed
-        position.is_liquidated = true;
-        msg!("Position fully closed");
+        position.is_liquidated = true; // Mark as closed
+        position.size_usd = 0;
+        position.collateral_amount = 0;
+        position.collateral_usd = 0;
+        position.locked_amount = 0;
     } else {
-        // Partial close: Update position with remaining amounts
-        position.position_size = math::checked_sub(position.position_size, position_size_to_close)?;
+        // Update position for partial close
+        position.size_usd = math::checked_sub(position.size_usd, size_usd_to_close)?;
         position.collateral_amount = math::checked_sub(position.collateral_amount, collateral_amount_to_close)?;
-        position.unrealized_pnl = total_pnl - pnl_for_closed_portion;
-        
-        // Recalculate metrics for remaining position
-        let remaining_position_value_usd = position.position_size as f64 / math::checked_powi(10.0, sol_custody.decimals as i32)?;
-        let remaining_collateral_value_usd = position.collateral_amount as f64 / math::checked_powi(10.0, if position.side == PerpSide::Long { sol_custody.decimals } else { usdc_custody.decimals } as i32)?;
-        
-        // Leverage stays the same in proportional close
-        position.leverage = f64_to_scaled_ratio(math::checked_float_div(remaining_position_value_usd, remaining_collateral_value_usd)?)?;
-        
-        // Update margin ratio
-        position.last_update_time = current_time;
-        
-        msg!("Partial close completed:");
-        msg!("Remaining position size: {}", position.position_size);
-        msg!("Remaining collateral: {}", position.collateral_amount);
-        msg!("Leverage: {}x", position.leverage);
-        msg!("Margin ratio: {}%", position.margin_ratio as f64 / 10_000.0);
+        position.collateral_usd = math::checked_sub(position.collateral_usd, collateral_usd_to_close)?;
+        position.locked_amount = math::checked_sub(position.locked_amount, locked_amount_to_release)?;
+        position.borrow_size_usd = position.size_usd.saturating_sub(position.collateral_usd);
     }
     
-    msg!("Original collateral: {}", if position.side == PerpSide::Long { "SOL" } else { "USDC" });
-    msg!("Settlement received as: {}", if params.receive_sol { "SOL" } else { "USDC" });
+    // Update fee tracking
+    let closing_fee = math::checked_div(size_usd_to_close, 1000)?; // 0.1% closing fee
+    position.total_fees_paid = math::checked_add(position.total_fees_paid, closing_fee)?;
+    position.total_fees_paid = math::checked_add(position.total_fees_paid, interest_for_closed_portion)?;
+    
+    position.update_time = current_time;
+    
+    msg!("Successfully closed {}% of perpetual position", params.close_percentage);
+    msg!("Settlement amount: {} tokens", settlement_tokens);
+    msg!("Remaining size USD: {}", position.size_usd);
     
     Ok(())
 }
@@ -217,19 +222,11 @@ pub struct ClosePerpPosition<'info> {
 
     #[account(
         mut,
-        constraint = user_sol_account.mint == sol_custody.mint,
         has_one = owner
     )]
-    pub user_sol_account: Box<Account<'info, TokenAccount>>,
+    pub receiving_account: Box<Account<'info, TokenAccount>>,
 
-    #[account(
-        mut,
-        constraint = user_usdc_account.mint == usdc_custody.mint,
-        has_one = owner
-    )]
-    pub user_usdc_account: Box<Account<'info, TokenAccount>>,
-
-    /// CHECK: Transfer authority for custody token accounts
+    /// CHECK: Transfer authority PDA for contract token operations
     #[account(
         seeds = [b"transfer_authority"],
         bump = contract.transfer_authority_bump
@@ -252,14 +249,14 @@ pub struct ClosePerpPosition<'info> {
     #[account(
         mut,
         seeds = [
-            b"perp_position",
+            b"position",
             owner.key().as_ref(),
             params.position_index.to_le_bytes().as_ref(),
             pool.key().as_ref()
         ],
         bump = position.bump
     )]
-    pub position: Box<Account<'info, PerpPosition>>,
+    pub position: Box<Account<'info, Position>>,
 
     #[account(
         mut,
@@ -297,12 +294,16 @@ pub struct ClosePerpPosition<'info> {
     )]
     pub usdc_custody_token_account: Box<Account<'info, TokenAccount>>,
 
-    /// CHECK: SOL price oracle
-    #[account(constraint = sol_oracle_account.key() == sol_custody.oracle)]
+    /// CHECK: Oracle account validation is handled by constraint
+    #[account(
+        constraint = sol_oracle_account.key() == sol_custody.oracle
+    )]
     pub sol_oracle_account: AccountInfo<'info>,
 
-    /// CHECK: USDC price oracle
-    #[account(constraint = usdc_oracle_account.key() == usdc_custody.oracle)]
+    /// CHECK: Oracle account validation is handled by constraint
+    #[account(
+        constraint = usdc_oracle_account.key() == usdc_custody.oracle
+    )]
     pub usdc_oracle_account: AccountInfo<'info>,
 
     #[account(mut)]

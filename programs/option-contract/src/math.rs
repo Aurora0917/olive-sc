@@ -11,7 +11,7 @@ where
         Ok(res)
     } else {
         msg!("Error: Overflow in {} + {}", arg1, arg2);
-        err!(MathError::OverflowMathError)
+        err!(MathError::MathOverflow)
     }
 }
 
@@ -23,7 +23,7 @@ where
         Ok(res)
     } else {
         msg!("Error: Overflow in {} - {}", arg1, arg2);
-        err!(MathError::OverflowMathError)
+        err!(MathError::MathOverflow)
     }
 }
 
@@ -35,7 +35,7 @@ where
         Ok(res)
     } else {
         msg!("Error: Overflow in {} / {}", arg1, arg2);
-        err!(MathError::OverflowMathError)
+        err!(MathError::MathOverflow)
     }
 }
 
@@ -45,12 +45,12 @@ where
 {
     if arg2 == T::zero() {
         msg!("Error: Overflow in {} / {}", arg1, arg2);
-        return err!(MathError::OverflowMathError);
+        return err!(MathError::MathOverflow);
     }
     let res = arg1 / arg2;
     if !res.is_finite() {
         msg!("Error: Overflow in {} / {}", arg1, arg2);
-        err!(MathError::OverflowMathError)
+        err!(MathError::MathOverflow)
     } else {
         Ok(res)
     }
@@ -65,7 +65,7 @@ where
         Ok(res)
     } else {
         msg!("Error: Overflow in {} as u64", arg);
-        err!(MathError::OverflowMathError)
+        err!(MathError::MathOverflow)
     }
 }
 
@@ -77,7 +77,7 @@ where
         Ok(res)
     } else {
         msg!("Error: Overflow in {} * {}", arg1, arg2);
-        err!(MathError::OverflowMathError)
+        err!(MathError::MathOverflow)
     }
 }
 
@@ -89,7 +89,7 @@ where
         Ok(res)
     } else {
         msg!("Error: Overflow in {} ^ {}", arg, exp);
-        err!(MathError::OverflowMathError)
+        err!(MathError::MathOverflow)
     }
 }
 
@@ -100,7 +100,7 @@ where
     let res = arg1 * arg2;
     if !res.is_finite() {
         msg!("Error: Overflow in {} * {}", arg1, arg2);
-        err!(MathError::OverflowMathError)
+        err!(MathError::MathOverflow)
     } else {
         Ok(res)
     }
@@ -115,7 +115,7 @@ where
         Ok(result)
     } else {
         msg!("Math error: checked_float_add overflow {} + {}", arg1, arg2);
-        Err(error!(crate::errors::TradingError::MathOverflow))
+        Err(error!(crate::errors::MathError::MathOverflow))
     }
 }
 
@@ -128,7 +128,7 @@ where
         Ok(result)
     } else {
         msg!("Math error: checked_float_sub overflow {} - {}", arg1, arg2);
-        Err(error!(crate::errors::TradingError::MathOverflow))
+        Err(error!(crate::errors::MathError::MathOverflow))
     }
 }
 
@@ -141,7 +141,7 @@ where
         Ok(res)
     } else {
         msg!("Error: Overflow in {} as f64", arg);
-        err!(MathError::OverflowMathError)
+        err!(MathError::MathOverflow)
     }
 }
 
@@ -156,7 +156,7 @@ pub fn checked_powi(arg: f64, exp: i32) -> Result<f64> {
         Ok(res)
     } else {
         msg!("Error: Overflow in {} ^ {}", arg, exp);
-        err!(MathError::OverflowMathError)
+        err!(MathError::MathOverflow)
     }
 }
 
@@ -193,7 +193,7 @@ pub fn checked_decimal_div(
 ) -> Result<u64> {
     if coefficient2 == 0 {
         msg!("Error: Overflow in {} / {}", coefficient1, coefficient2);
-        return err!(MathError::OverflowMathError);
+        return err!(MathError::MathOverflow);
     }
     if coefficient1 == 0 {
         return Ok(0);
@@ -246,13 +246,13 @@ where
             Ok(res + T::one())
         } else {
             msg!("Error: Overflow in {} / {}", arg1, arg2);
-            err!(MathError::OverflowMathError)
+            err!(MathError::MathOverflow)
         }
     } else if let Some(res) = arg1.checked_div(&arg2) {
         Ok(res)
     } else {
         msg!("Error: Overflow in {} / {}", arg1, arg2);
-        err!(MathError::OverflowMathError)
+        err!(MathError::MathOverflow)
     }
 }
 
@@ -308,12 +308,12 @@ pub const MAX_SAFE_PRICE_F64: f64 = 18_446_744_073_709.0;
 pub fn f64_to_scaled_price(price: f64) -> Result<u64> {
     if !price.is_finite() || price < 0.0 {
         msg!("Error: Invalid price value: {}", price);
-        return err!(MathError::OverflowMathError);
+        return err!(MathError::MathOverflow);
     }
     
     if price > MAX_SAFE_PRICE_F64 {
         msg!("Error: Price {} exceeds maximum safe value {}", price, MAX_SAFE_PRICE_F64);
-        return err!(MathError::OverflowMathError);
+        return err!(MathError::MathOverflow);
     }
     
     let scaled = checked_float_mul(price, PRICE_SCALE as f64)?;
@@ -330,12 +330,12 @@ pub fn scaled_price_to_f64(scaled_price: u64) -> Result<f64> {
 pub fn f64_to_scaled_ratio(ratio: f64) -> Result<u64> {
     if !ratio.is_finite() || ratio < 0.0 {
         msg!("Error: Invalid ratio value: {}", ratio);
-        return err!(MathError::OverflowMathError);
+        return err!(MathError::MathOverflow);
     }
     
     if ratio > MAX_SAFE_PRICE_F64 {
         msg!("Error: Ratio {} exceeds maximum safe value {}", ratio, MAX_SAFE_PRICE_F64);
-        return err!(MathError::OverflowMathError);
+        return err!(MathError::MathOverflow);
     }
     
     let scaled = checked_float_mul(ratio, PRICE_SCALE as f64)?;
@@ -359,7 +359,7 @@ pub fn scaled_mul(val1: u64, val2: u64) -> Result<u64> {
 pub fn scaled_div(numerator: u64, denominator: u64) -> Result<u64> {
     if denominator == 0 {
         msg!("Error: Division by zero in scaled_div");
-        return err!(MathError::OverflowMathError);
+        return err!(MathError::MathOverflow);
     }
     
     let scaled_numerator = checked_mul(numerator as u128, PRICE_SCALE as u128)?;
@@ -378,7 +378,7 @@ pub fn scaled_to_bps(scaled_pct: u64) -> Result<u32> {
     let bps = checked_div(scaled_pct, 10_000)?; // 1_000_000 / 100 = 10_000
     if bps > u32::MAX as u64 {
         msg!("Error: BPS value {} exceeds u32::MAX", bps);
-        return err!(MathError::OverflowMathError);
+        return err!(MathError::MathOverflow);
     }
     Ok(bps as u32)
 }

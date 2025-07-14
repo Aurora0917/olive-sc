@@ -1,5 +1,5 @@
 use crate::{
-    errors::OptionError,
+    errors::{OptionError, PoolError, TradingError},
     math::{self, scaled_price_to_f64},
     state::{Contract, Custody, OptionDetail, OraclePrice, Pool, User},
 };
@@ -60,7 +60,7 @@ pub fn close_option(ctx: Context<CloseOption>, params: &CloseOptionParams) -> Re
         require_gte!(
             locked_custody.token_locked,
             unlock_amount,
-            OptionError::InvalidLockedBalanceError
+            TradingError::InvalidLockedBalanceError
         );
 
         // Time decay logic for Black-Scholes
@@ -137,7 +137,7 @@ pub fn close_option(ctx: Context<CloseOption>, params: &CloseOptionParams) -> Re
         require_gte!(
             math::checked_sub(locked_custody.token_owned, locked_custody.token_locked)?,
             refund_amount,
-            OptionError::InvalidPoolBalanceError
+            PoolError::InvalidPoolBalanceError
         );
 
         // Update locked custody balances
@@ -212,7 +212,7 @@ pub struct CloseOption<'info> {
     #[account(mut)]
     pub owner: Signer<'info>,
 
-    // ✅ CRITICAL FIX: funding_account should match LOCKED asset, not premium asset
+    // funding_account should match LOCKED asset, not premium asset
     #[account(
         mut,
         constraint = funding_account.mint == locked_custody.mint,
@@ -247,7 +247,7 @@ pub struct CloseOption<'info> {
     )]
     pub user: Box<Account<'info, User>>,
 
-    // ✅ MOVE MINTS TO TOP
+    // MOVE MINTS TO TOP
     #[account(mut)]
     pub custody_mint: Box<Account<'info, Mint>>,
     #[account(mut)]
@@ -282,7 +282,7 @@ pub struct CloseOption<'info> {
     )]
     pub locked_custody: Box<Account<'info, Custody>>, // locked asset (where refund comes from)
 
-    // ✅ CRITICAL FIX: Transfer comes from locked custody token account
+    // Transfer comes from locked custody token account
     #[account(
         mut,
         seeds = [b"custody_token_account",

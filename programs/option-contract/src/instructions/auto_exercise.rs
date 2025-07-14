@@ -1,5 +1,5 @@
 use crate::{
-    errors::OptionError,
+    errors::{OptionError, TradingError},
     math::{self, scaled_price_to_f64},
     state::{Contract, Custody, OptionDetail, OraclePrice, Pool, User},
 };
@@ -27,33 +27,33 @@ pub fn auto_exercise(
     let locked_custody = &mut ctx.accounts.locked_custody;
     let locked_oracle = &ctx.accounts.locked_oracle;
 
-    // ✅ CRITICAL VALIDATION CHECKS - Add these at the beginning
+    // CRITICAL VALIDATION CHECKS - Add these at the beginning
     require_gte!(user.option_index, params.option_index);
     
-    // ✅ Prevent re-exercising the same option
+    // Prevent re-exercising the same option
     require_eq!(
         option_detail.exercised,
         0,
         OptionError::OptionAlreadyExercised
     );
     
-    // ✅ Ensure option is still valid
+    // Ensure option is still valid
     require!(
         option_detail.valid,
         OptionError::OptionNotValid
     );
     
-    // ✅ Verify option belongs to the specified user
+    // Verify option belongs to the specified user
     require_eq!(
         option_detail.owner,
         params.user,
-        OptionError::InvalidOwner
+        TradingError::InvalidOwner
     );
 
     // Current Unix timestamp
     let current_timestamp = contract.get_time()?;
 
-    // ✅ FIXED: Auto-exercise should only work AFTER expiry (opposite of manual exercise)
+    // Auto-exercise should only work AFTER expiry (opposite of manual exercise)
     require_gte!(
         current_timestamp,
         option_detail.expired_date,
@@ -67,7 +67,7 @@ pub fn auto_exercise(
     require_gte!(
         locked_custody.token_locked,
         option_detail.amount,
-        OptionError::InvalidLockedBalanceError
+        TradingError::InvalidLockedBalanceError
     );
 
     if custody.key() == locked_custody.key() {
@@ -100,11 +100,11 @@ pub fn auto_exercise(
         }
     }
 
-    // ✅ Mark option as exercised and invalid
+    // Mark option as exercised and invalid
     option_detail.exercised = current_timestamp as u64;
     option_detail.valid = false;
 
-    // ✅ Update locked custody balance
+    // Update locked custody balance
     locked_custody.token_locked =
         math::checked_sub(locked_custody.token_locked, option_detail.amount)?;
 
@@ -130,14 +130,14 @@ pub struct AutoExerciseOption<'info> {
     )]
     pub pool: Box<Account<'info, Pool>>,
 
-    // ✅ CRITICAL FIX: MOVE ALL MINTS TO TOP BEFORE DEPENDENT ACCOUNTS
+    // MOVE ALL MINTS TO TOP BEFORE DEPENDENT ACCOUNTS
     #[account(mut)]
     pub custody_mint: Box<Account<'info, Mint>>,
     
     #[account(mut)]
     pub locked_custody_mint: Box<Account<'info, Mint>>,
 
-    // ✅ NOW these accounts can derive correctly with mints available
+    // NOW these accounts can derive correctly with mints available
     #[account(
         mut,
         seeds = [b"custody",
@@ -153,9 +153,9 @@ pub struct AutoExerciseOption<'info> {
     )]
     pub user: Box<Account<'info, User>>,
 
-    // ✅ CRITICAL FIX: Add `mut` to option_detail!
+    // Add `mut` to option_detail!
     #[account(
-        mut,  // ✅ THIS WAS MISSING! Without this, changes aren't saved!
+        mut,  // Without this, changes aren't saved!
         seeds = [b"option", params.user.key().as_ref(), 
                 params.option_index.to_le_bytes().as_ref(),
                 pool.key().as_ref(), custody.key().as_ref()],
@@ -169,7 +169,7 @@ pub struct AutoExerciseOption<'info> {
                  pool.key().as_ref(),
                  locked_custody_mint.key().as_ref()],
         bump = locked_custody.bump,
-        constraint = locked_custody.mint == locked_custody_mint.key() @ OptionError::InvalidMintError
+        constraint = locked_custody.mint == locked_custody_mint.key() @ TradingError::InvalidMintError
     )]
     pub locked_custody: Box<Account<'info, Custody>>, // locked asset
 

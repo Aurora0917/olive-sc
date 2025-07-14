@@ -1,8 +1,6 @@
-//! RemoveLiquidity instruction handler
-
 use {
     crate::{
-        errors::ContractError, math, state::{
+        errors::{ContractError, PerpetualError, PoolError}, math, state::{
             custody::Custody,
             oracle::OraclePrice, Contract, Pool,
         }
@@ -160,12 +158,12 @@ pub fn remove_liquidity<'info>(
     let withdrawal_amount = math::checked_add(transfer_amount, fee_amount)?;
     require!(
         pool.check_token_ratio(token_id, 0, withdrawal_amount, custody, &token_price)?,
-        ContractError::TokenRatioOutOfRange
+        PoolError::TokenRatioOutOfRange
     );
 
     require!(
         math::checked_sub(custody.token_owned, custody.token_locked)? >= withdrawal_amount,
-        ContractError::CustodyAmountLimit
+        PerpetualError::CustodyAmountLimit
     );
 
     // transfer tokens

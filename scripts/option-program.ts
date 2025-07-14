@@ -102,7 +102,7 @@ const createMintsAlternative = async () => {
     }).sendAndConfirm(umi);
 
     USDCMint = new PublicKey(usdcMint.publicKey);
-    console.log("✅ USDC Token created:", USDCMint.toBase58());
+    console.log("USDC Token created:", USDCMint.toBase58());
 
     // === CREATE WSOL TOKEN ===
     console.log("💎 Creating WSOL token...");
@@ -123,7 +123,7 @@ const createMintsAlternative = async () => {
     }).sendAndConfirm(umi);
 
     WSOLMint = new PublicKey(wsolMint.publicKey);
-    console.log("✅ WSOL Token created:", WSOLMint.toBase58());
+    console.log("WSOL Token created:", WSOLMint.toBase58());
 
     console.log("🎉 All tokens created successfully with Umi!");
 
@@ -967,7 +967,7 @@ const exerciseOption_Call = async (_poolName: string, _index: number) => {
     program.programId
   );
 
-  // ✅ CRITICAL: Derive locked custody PDA (not mint!)
+  // CRITICAL: Derive locked custody PDA (not mint!)
   const [lockedCustody] = PublicKey.findProgramAddressSync(
     [Buffer.from("custody"), newPool.toBuffer(), USDCMint.toBuffer()],
     program.programId
@@ -1009,20 +1009,20 @@ const exerciseOption_Call = async (_poolName: string, _index: number) => {
         contract: contract,
         pool: poolPDA,
 
-        // ✅ ACCOUNT ORDER MATCHES RUST STRUCT
+        // ACCOUNT ORDER MATCHES RUST STRUCT
         custodyMint: WSOLMint,              // Mint first
         lockedCustodyMint: USDCMint,        // Mint first
         custody: wsolCustody,               // Then dependent accounts
         user: user,
         optionDetail: optionDetail,
-        lockedCustody: lockedCustody,       // ✅ FIXED: Use custody PDA, not mint!
+        lockedCustody: lockedCustody,       // Use custody PDA, not mint!
         lockedCustodyTokenAccount: lockedCustodyTokenAccount,
         lockedOracle: USDC_ORACLE,
       })
       .signers([wallet.payer])
       .rpc();
 
-    console.log("✅ Exercise option successful:", tx);
+    console.log("Exercise option successful:", tx);
     return tx;
 
   } catch (error) {
@@ -1043,15 +1043,15 @@ const exerciseOption_Call = async (_poolName: string, _index: number) => {
 .accounts({
   // ...
   lockedCustody: WSOLMint,           // ❌ WRONG! This is a mint, not custody PDA
-  lockedCustodyMint: WSOLMint,       // ✅ Correct
+  lockedCustodyMint: WSOLMint,       // Correct
   // ...
 })
 
-✅ AFTER (Fixed code):
+AFTER (Fixed code):
 .accounts({
   // ...
-  lockedCustody: lockedCustody,      // ✅ CORRECT! This is the custody PDA
-  lockedCustodyMint: WSOLMint,       // ✅ Correct
+  lockedCustody: lockedCustody,      // CORRECT! This is the custody PDA
+  lockedCustodyMint: WSOLMint,       // Correct
   // ...
 })
 
@@ -1060,7 +1060,7 @@ const exerciseOption_Call = async (_poolName: string, _index: number) => {
 - You were passing: WSOLMint (mint account owned by Token Program)
 - Result: AccountOwnedByWrongProgram error
 
-✅ SOLUTION:
+SOLUTION:
 - Pass the derived lockedCustody PDA instead of the mint
 - Account order matches your fixed Rust struct
 - All constraints should now validate correctly
@@ -1189,7 +1189,7 @@ const createFundedTokenAccountsViaTransfer = async (targetWalletAddress: string)
       TOKEN_PROGRAM_ID
     );
 
-    console.log("✅ USDC account created:", targetUSDCAccount.address.toBase58());
+    console.log("USDC account created:", targetUSDCAccount.address.toBase58());
 
     // === TRANSFER 50M USDC ===
     console.log("📤 Transferring 50M USDC...");
@@ -1206,7 +1206,7 @@ const createFundedTokenAccountsViaTransfer = async (targetWalletAddress: string)
       TOKEN_PROGRAM_ID
     );
 
-    console.log("✅ USDC transfer complete, TX:", usdcTransferTx);
+    console.log("USDC transfer complete, TX:", usdcTransferTx);
 
     // === CREATE TARGET WSOL ACCOUNT ===
     console.log("💰 Creating target WSOL token account...");
@@ -1222,7 +1222,7 @@ const createFundedTokenAccountsViaTransfer = async (targetWalletAddress: string)
       TOKEN_PROGRAM_ID
     );
 
-    console.log("✅ WSOL account created:", targetWSOLAccount.address.toBase58());
+    console.log("WSOL account created:", targetWSOLAccount.address.toBase58());
 
     // === TRANSFER 50M WSOL ===
     console.log("📤 Transferring 50M WSOL...");
@@ -1239,7 +1239,7 @@ const createFundedTokenAccountsViaTransfer = async (targetWalletAddress: string)
       TOKEN_PROGRAM_ID
     );
 
-    console.log("✅ WSOL transfer complete, TX:", wsolTransferTx);
+    console.log("WSOL transfer complete, TX:", wsolTransferTx);
 
     // === SUMMARY ===
     console.log("🚀 Successfully created funded accounts via transfer:");

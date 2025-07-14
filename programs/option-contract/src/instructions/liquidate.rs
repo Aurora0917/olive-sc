@@ -1,8 +1,7 @@
-// ==================== instructions/liquidate.rs ====================
 use crate::{
-    errors::OptionError,
-    math::{self, scaled_price_to_f64},
-    state::{Contract, Custody, OraclePrice, Pool, PerpPosition, PerpSide},
+    errors::PerpetualError,
+    math::{self, f64_to_scaled_price},
+    state::{Contract, Custody, OraclePrice, Pool, Position, Side, PositionType},
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
@@ -11,6 +10,7 @@ use anchor_spl::token::{Mint, Token, TokenAccount};
 pub struct LiquidateParams {
     pub position_index: u64,
     pub pool_name: String,
+    pub liquidator_reward_account: Pubkey, // Account to receive liquidator reward
 }
 
 pub fn liquidate(
@@ -24,8 +24,9 @@ pub fn liquidate(
     let sol_custody = &mut ctx.accounts.sol_custody;
     let usdc_custody = &mut ctx.accounts.usdc_custody;
     
-    // Check permissions - anyone can liquidate an eligible position
-    require!(!position.is_liquidated, OptionError::PositionLiquidated);
+    // Validation
+    require!(!position.is_liquidated, PerpetualError::PositionLiquidated);
+    require!(position.position_type == PositionType::Market, PerpetualError::InvalidPositionType);
     
     // Get current prices from oracles
     let current_time = contract.get_time()?;
@@ -34,158 +35,154 @@ pub fn liquidate(
     
     let current_sol_price = sol_price.get_price();
     let usdc_price_value = usdc_price.get_price();
+    let current_price_scaled = f64_to_scaled_price(current_sol_price)?;
     
     msg!("SOL Price: {}", current_sol_price);
     msg!("USDC Price: {}", usdc_price_value);
     msg!("Liquidating position owned by: {}", position.owner);
+    msg!("Position entry price: {}", position.price);
     msg!("Position liquidation price: {}", position.liquidation_price);
+    msg!("Position side: {:?}", position.side);
     
-    // Check if position can be liquidated (simple price comparison)
-    let liquidation_price_f64 = scaled_price_to_f64(position.liquidation_price)?;
-    let liquidatable = match position.side {
-        PerpSide::Long => {
-            msg!("Long position: current_price {} <= liquidation_price {}", current_sol_price, liquidation_price_f64);
-            current_sol_price <= liquidation_price_f64
-        },
-        PerpSide::Short => {
-            msg!("Short position: current_price {} >= liquidation_price {}", current_sol_price, liquidation_price_f64);
-            current_sol_price >= liquidation_price_f64
-        }
-    };
+    // Check if position can be liquidated by price
+    let price_liquidatable = position.is_liquidatable(current_price_scaled);
     
-    require!(liquidatable, OptionError::PositionNotLiquidatable);
+    // Check if position can be liquidated by margin ratio
+    let margin_liquidatable = position.is_liquidatable_by_margin(current_price_scaled)?;
+    
+    // Must be liquidatable by either price or margin
+    require!(
+        price_liquidatable || margin_liquidatable,
+        PerpetualError::PositionNotLiquidatable
+    );
+    
     msg!("Position is eligible for liquidation");
+    msg!("Price liquidatable: {}", price_liquidatable);
+    msg!("Margin liquidatable: {}", margin_liquidatable);
     
-    // Determine collateral asset info (same logic as open_perp)
-    let (collateral_price, collateral_decimals) = if position.collateral_asset == position.sol_custody {
+    // Calculate P&L
+    let pnl = position.calculate_pnl(current_price_scaled)?;
+    
+    // Calculate funding and interest payments
+    let funding_payment = position.calculate_funding_payment(0)?; // TODO: Get from pool
+    let interest_payment = position.calculate_interest_payment(0)?; // TODO: Get from pool
+    
+    // Calculate liquidator reward (0.5% of position size)
+    let liquidator_reward_usd = math::checked_div(position.size_usd, 200)?; // 0.5%
+    
+    // Calculate net settlement after all deductions
+    let mut net_settlement = position.collateral_usd as i64 + pnl - funding_payment - interest_payment as i64 - liquidator_reward_usd as i64;
+    
+    // Ensure settlement is not negative
+    if net_settlement < 0 {
+        net_settlement = 0;
+    }
+    
+    let settlement_usd = net_settlement as u64;
+    
+    msg!("P&L: {}", pnl);
+    msg!("Funding payment: {}", funding_payment);
+    msg!("Interest payment: {}", interest_payment);
+    msg!("Liquidator reward USD: {}", liquidator_reward_usd);
+    msg!("Net settlement USD: {}", settlement_usd);
+    
+    // Calculate settlement amounts in tokens
+    let (collateral_price, collateral_decimals) = if position.collateral_custody == sol_custody.key() {
         (current_sol_price, sol_custody.decimals)
     } else {
         (usdc_price_value, usdc_custody.decimals)
     };
     
-    // Calculate P&L for settlement
-    let entry_price_f64 = scaled_price_to_f64(position.entry_price)?;
-    let price_diff = match position.side {
-        PerpSide::Long => current_sol_price - entry_price_f64,
-        PerpSide::Short => entry_price_f64 - current_sol_price,
-    };
-    
-    let position_value_usd = position.position_size as f64 / math::checked_powi(10.0, sol_custody.decimals as i32)?;
-    let pnl_ratio = math::checked_float_div(price_diff, entry_price_f64)?;
-    let unrealized_pnl_usd = math::checked_float_mul(pnl_ratio, position_value_usd)?;
-    let total_pnl = (unrealized_pnl_usd * 1_000_000.0) as i64; // Convert to micro-USD
-    
-    msg!("Total P&L: ${}", total_pnl as f64 / 1_000_000.0);
-    
-    // Calculate liquidation amounts (same as close_perp logic)
-    let collateral_value_tokens = position.collateral_amount as f64 / math::checked_powi(10.0, collateral_decimals as i32)?;
-    let collateral_value_usd = math::checked_float_mul(collateral_value_tokens, collateral_price)?;
-    
-    // Calculate settlement after P&L
-    let settlement_value_usd = collateral_value_usd + (total_pnl as f64 / 1_000_000.0);
-    let settlement_amount_tokens = if settlement_value_usd > 0.0 {
-        math::checked_as_u64(settlement_value_usd / collateral_price * math::checked_powi(10.0, collateral_decimals as i32)?)?
-    } else {
-        0 // Total loss
-    };
-    
-    // Calculate liquidation reward (e.g., 5% of remaining collateral or minimum amount)
-    let liquidation_reward_rate = 0.05; // 5% liquidation reward
-    let min_liquidation_reward = 1000; // Minimum reward in tokens
-    
-    let liquidation_reward = if settlement_amount_tokens > 0 {
-        let calculated_reward = math::checked_as_u64(settlement_amount_tokens as f64 * liquidation_reward_rate)?;
-        calculated_reward.max(min_liquidation_reward).min(settlement_amount_tokens)
+    // Settlement to position owner
+    let settlement_tokens = if settlement_usd > 0 {
+        let amount = math::checked_as_u64(settlement_usd as f64 / collateral_price)?;
+        math::checked_as_u64(amount as f64 * math::checked_powi(10.0, collateral_decimals as i32)?)?
     } else {
         0
     };
     
-    let user_settlement = if settlement_amount_tokens > liquidation_reward {
-        math::checked_sub(settlement_amount_tokens, liquidation_reward)?
+    // Liquidator reward tokens
+    let liquidator_reward_tokens = if liquidator_reward_usd > 0 {
+        let amount = math::checked_as_u64(liquidator_reward_usd as f64 / collateral_price)?;
+        math::checked_as_u64(amount as f64 * math::checked_powi(10.0, collateral_decimals as i32)?)?
     } else {
         0
     };
     
-    msg!("Settlement amount: {}", settlement_amount_tokens);
-    msg!("Liquidation reward: {}", liquidation_reward);
-    msg!("User receives: {}", user_settlement);
-    
-    // Unlock locked tokens based on position side (MATCH open_perp/close_perp logic)
-    match position.side {
-        PerpSide::Long => {
-            // Unlock SOL tokens for long position
-            sol_custody.token_locked = math::checked_sub(sol_custody.token_locked, position.position_size)?;
-        },
-        PerpSide::Short => {
-            // Use same 1:1 SOL:USDC token ratio as open_perp/close_perp
-            let position_value_sol = position.position_size as f64 / math::checked_powi(10.0, sol_custody.decimals as i32)?;
-            let usdc_to_unlock = math::checked_as_u64(
-                position_value_sol * math::checked_powi(10.0, usdc_custody.decimals as i32)?
-            )?;
-            usdc_custody.token_locked = math::checked_sub(usdc_custody.token_locked, usdc_to_unlock)?;
-        }
-    }
-    
-    let authority_bump = contract.transfer_authority_bump;
-    let signer_seeds: &[&[&[u8]]] = &[&[b"transfer_authority", &[authority_bump]]];
-    
-    // Determine which custody accounts to use based on collateral asset
-    let (custody_token_account, user_account, liquidator_account) = if position.collateral_asset == position.sol_custody {
-        (&ctx.accounts.sol_custody_token_account, &ctx.accounts.user_sol_account, &ctx.accounts.liquidator_sol_account)
-    } else {
-        (&ctx.accounts.usdc_custody_token_account, &ctx.accounts.user_usdc_account, &ctx.accounts.liquidator_usdc_account)
-    };
-    
-    // Transfer remaining collateral to position owner (if any)
-    if user_settlement > 0 {
-        anchor_spl::token::transfer(
-            CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
-                anchor_spl::token::Transfer {
-                    from: custody_token_account.to_account_info(),
-                    to: user_account.to_account_info(),
-                    authority: ctx.accounts.transfer_authority.to_account_info(),
-                },
-                signer_seeds,
-            ),
-            user_settlement,
+    // Transfer settlement to position owner if any
+    if settlement_tokens > 0 {
+        ctx.accounts.contract.transfer_tokens(
+            if position.collateral_custody == sol_custody.key() {
+                ctx.accounts.sol_custody_token_account.to_account_info()
+            } else {
+                ctx.accounts.usdc_custody_token_account.to_account_info()
+            },
+            ctx.accounts.owner_settlement_account.to_account_info(),
+            ctx.accounts.transfer_authority.to_account_info(),
+            ctx.accounts.token_program.to_account_info(),
+            settlement_tokens,
         )?;
-        msg!("Transferred {} tokens to position owner", user_settlement);
     }
     
-    // Transfer liquidation reward to liquidator
-    if liquidation_reward > 0 {
-        anchor_spl::token::transfer(
-            CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
-                anchor_spl::token::Transfer {
-                    from: custody_token_account.to_account_info(),
-                    to: liquidator_account.to_account_info(),
-                    authority: ctx.accounts.transfer_authority.to_account_info(),
-                },
-                signer_seeds,
-            ),
-            liquidation_reward,
+    // Transfer liquidator reward
+    if liquidator_reward_tokens > 0 {
+        ctx.accounts.contract.transfer_tokens(
+            if position.collateral_custody == sol_custody.key() {
+                ctx.accounts.sol_custody_token_account.to_account_info()
+            } else {
+                ctx.accounts.usdc_custody_token_account.to_account_info()
+            },
+            ctx.accounts.liquidator_reward_account.to_account_info(),
+            ctx.accounts.transfer_authority.to_account_info(),
+            ctx.accounts.token_program.to_account_info(),
+            liquidator_reward_tokens,
         )?;
-        msg!("Transferred {} tokens to liquidator as reward", liquidation_reward);
     }
     
-    // Update custody stats - remove all collateral from the system (same as open_perp logic)
-    if position.collateral_asset == position.sol_custody {
-        sol_custody.token_owned = math::checked_sub(sol_custody.token_owned, position.collateral_amount)?;
+    // Update custody stats - release locked tokens
+    if position.side == Side::Long {
+        sol_custody.token_locked = math::checked_sub(
+            sol_custody.token_locked,
+            position.locked_amount
+        )?;
     } else {
-        usdc_custody.token_owned = math::checked_sub(usdc_custody.token_owned, position.collateral_amount)?;
+        usdc_custody.token_locked = math::checked_sub(
+            usdc_custody.token_locked,
+            position.locked_amount
+        )?;
+    }
+    
+    // Update custody ownership - remove collateral
+    if position.collateral_custody == sol_custody.key() {
+        sol_custody.token_owned = math::checked_sub(
+            sol_custody.token_owned,
+            position.collateral_amount
+        )?;
+    } else {
+        usdc_custody.token_owned = math::checked_sub(
+            usdc_custody.token_owned,
+            position.collateral_amount
+        )?;
     }
     
     // Mark position as liquidated
     position.is_liquidated = true;
-    position.last_update_time = current_time;
+    position.size_usd = 0;
+    position.collateral_amount = 0;
+    position.collateral_usd = 0;
+    position.locked_amount = 0;
+    position.update_time = current_time;
     
-    msg!("Position liquidated successfully");
-    msg!("Position side: {}", if position.side == PerpSide::Long { "Long" } else { "Short" });
-    msg!("Collateral asset: {}", if position.collateral_asset == position.sol_custody { "SOL" } else { "USDC" });
-    msg!("Liquidator: {}", ctx.accounts.liquidator.key());
-    msg!("Final P&L: ${}", total_pnl as f64 / 1_000_000.0);
+    // Update fee tracking
+    let liquidation_fee = math::checked_div(position.size_usd, 100)?; // 1% liquidation fee
+    position.total_fees_paid = math::checked_add(position.total_fees_paid, liquidation_fee)?;
+    position.total_fees_paid = math::checked_add(position.total_fees_paid, interest_payment)?;
+    position.total_fees_paid = math::checked_add(position.total_fees_paid, liquidator_reward_usd)?;
+    
+    msg!("Successfully liquidated position");
+    msg!("Settlement to owner: {} tokens", settlement_tokens);
+    msg!("Liquidator reward: {} tokens", liquidator_reward_tokens);
+    msg!("Total fees paid: {}", position.total_fees_paid);
     
     Ok(())
 }
@@ -196,37 +193,14 @@ pub struct Liquidate<'info> {
     #[account(mut)]
     pub liquidator: Signer<'info>,
 
-    // Position owner's receiving accounts
-    #[account(
-        mut,
-        constraint = user_sol_account.mint == sol_custody.mint,
-        constraint = user_sol_account.owner == position.owner
-    )]
-    pub user_sol_account: Box<Account<'info, TokenAccount>>,
+    /// CHECK: Position owner for settlement
+    #[account(mut)]
+    pub owner_settlement_account: Box<Account<'info, TokenAccount>>,
 
-    #[account(
-        mut,
-        constraint = user_usdc_account.mint == usdc_custody.mint,
-        constraint = user_usdc_account.owner == position.owner
-    )]
-    pub user_usdc_account: Box<Account<'info, TokenAccount>>,
+    #[account(mut)]
+    pub liquidator_reward_account: Box<Account<'info, TokenAccount>>,
 
-    // Liquidator's reward receiving accounts
-    #[account(
-        mut,
-        constraint = liquidator_sol_account.mint == sol_custody.mint,
-        constraint = liquidator_sol_account.owner == liquidator.key()
-    )]
-    pub liquidator_sol_account: Box<Account<'info, TokenAccount>>,
-
-    #[account(
-        mut,
-        constraint = liquidator_usdc_account.mint == usdc_custody.mint,
-        constraint = liquidator_usdc_account.owner == liquidator.key()
-    )]
-    pub liquidator_usdc_account: Box<Account<'info, TokenAccount>>,
-
-    /// CHECK: Transfer authority for custody token accounts
+    /// CHECK: Transfer authority PDA for contract token operations
     #[account(
         seeds = [b"transfer_authority"],
         bump = contract.transfer_authority_bump
@@ -249,14 +223,14 @@ pub struct Liquidate<'info> {
     #[account(
         mut,
         seeds = [
-            b"perp_position",
+            b"position",
             position.owner.as_ref(),
             params.position_index.to_le_bytes().as_ref(),
             pool.key().as_ref()
         ],
         bump = position.bump
     )]
-    pub position: Box<Account<'info, PerpPosition>>,
+    pub position: Box<Account<'info, Position>>,
 
     #[account(
         mut,
@@ -294,12 +268,16 @@ pub struct Liquidate<'info> {
     )]
     pub usdc_custody_token_account: Box<Account<'info, TokenAccount>>,
 
-    /// CHECK: SOL price oracle
-    #[account(constraint = sol_oracle_account.key() == sol_custody.oracle)]
+    /// CHECK: Oracle account validation is handled by constraint
+    #[account(
+        constraint = sol_oracle_account.key() == sol_custody.oracle
+    )]
     pub sol_oracle_account: AccountInfo<'info>,
 
-    /// CHECK: USDC price oracle
-    #[account(constraint = usdc_oracle_account.key() == usdc_custody.oracle)]
+    /// CHECK: Oracle account validation is handled by constraint
+    #[account(
+        constraint = usdc_oracle_account.key() == usdc_custody.oracle
+    )]
     pub usdc_oracle_account: AccountInfo<'info>,
 
     #[account(mut)]

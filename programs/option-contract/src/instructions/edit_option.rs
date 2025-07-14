@@ -1,5 +1,5 @@
 use crate::{
-    errors::OptionError,
+    errors::{OptionError, PoolError, TradingError},
     math::{self, f64_to_scaled_price, scaled_price_to_f64},
     state::{Contract, Custody, OptionDetail, OraclePrice, Pool, User},
 };
@@ -52,7 +52,7 @@ pub fn edit_option(ctx: Context<EditOption>, params: &EditOptionParams) -> Resul
     // Validate at least one parameter is being changed
     require!(
         params.new_strike.is_some() || params.new_expiry.is_some() || params.new_size.is_some(),
-        OptionError::InvalidParameterError
+        TradingError::InvalidParameterError
     );
 
     // Get current oracle prices
@@ -104,8 +104,8 @@ pub fn edit_option(ctx: Context<EditOption>, params: &EditOptionParams) -> Resul
     let new_size = params.new_size.unwrap_or(current_size);
 
     // Validate new parameters
-    require!(new_size > 0.0, OptionError::InvalidParameterError);
-    require!(new_strike > 0.0, OptionError::InvalidParameterError);
+    require!(new_size > 0.0, TradingError::InvalidParameterError);
+    require!(new_strike > 0.0, TradingError::InvalidParameterError);
     require!(new_expiry > current_time, OptionError::InvalidTimeError);
 
     // Calculate time to expiration for NEW terms
@@ -150,14 +150,14 @@ pub fn edit_option(ctx: Context<EditOption>, params: &EditOptionParams) -> Resul
         require_gte!(
             params.max_additional_premium,
             additional_premium,
-            OptionError::SlippageExceededError
+            TradingError::SlippageExceededError
         );
 
         // Check user has enough balance
         require_gte!(
             funding_account.amount,
             additional_premium,
-            OptionError::InvalidSignerBalanceError
+            TradingError::InvalidSignerBalanceError
         );
 
         // Transfer additional premium from user to pool
@@ -197,14 +197,14 @@ pub fn edit_option(ctx: Context<EditOption>, params: &EditOptionParams) -> Resul
         require_gte!(
             actual_refund,
             params.min_refund_amount,
-            OptionError::SlippageExceededError
+            TradingError::SlippageExceededError
         );
 
         // Check pool has enough balance for refund
         require_gte!(
             math::checked_sub(pay_custody.token_owned, pay_custody.token_locked)?,
             actual_refund,
-            OptionError::InvalidPoolBalanceError
+            PoolError::InvalidPoolBalanceError
         );
 
         // Transfer refund from pool to user

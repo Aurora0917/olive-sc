@@ -1,5 +1,5 @@
 use crate::{
-    errors::OptionError,
+    errors::{OptionError, PoolError, TradingError},
     math::{self, f64_to_scaled_price},
     state::{Contract, Custody, OptionDetail, OraclePrice, Pool, User},
 };
@@ -18,7 +18,7 @@ pub struct OpenLimitOptionParams {
 
 pub fn open_limit_option(ctx: Context<OpenLimitOption>, params: &OpenLimitOptionParams) -> Result<()> {
     let owner = &ctx.accounts.owner;
-    let _token_program = &ctx.accounts.token_program;
+    let token_program = &ctx.accounts.token_program;
     let option_detail = &mut ctx.accounts.option_detail;
     let contract = &ctx.accounts.contract;
     let user = &mut ctx.accounts.user;
@@ -29,7 +29,7 @@ pub fn open_limit_option(ctx: Context<OpenLimitOption>, params: &OpenLimitOption
 
     let pay_custody = &mut ctx.accounts.pay_custody;
     let pay_custody_oracle_account = &ctx.accounts.pay_custody_oracle_account;
-    let _pay_custody_token_account = &ctx.accounts.pay_custody_token_account;
+    let pay_custody_token_account = &ctx.accounts.pay_custody_token_account;
 
     let funding_account = &ctx.accounts.funding_account;
 
@@ -41,21 +41,17 @@ pub fn open_limit_option(ctx: Context<OpenLimitOption>, params: &OpenLimitOption
     require_gte!(
         funding_account.amount,
         params.amount,
-        OptionError::InvalidSignerBalanceError
+        TradingError::InvalidSignerBalanceError
     );
 
     // Send Pay token from User to Pool Custody as premium
-    // token::transfer(
-    //     CpiContext::new(
-    //         token_program.to_account_info(),
-    //         SplTransfer {
-    //             from: funding_account.to_account_info(),
-    //             to: pay_custody_token_account.to_account_info(),
-    //             authority: owner.to_account_info(),
-    //         },
-    //     ),
-    //     params.amount,
-    // )?;
+    contract.transfer_tokens_from_user(
+        funding_account.to_account_info(),
+        pay_custody_token_account.to_account_info(),
+        owner.to_account_info(),
+        token_program.to_account_info(),
+        params.amount,
+    )?;
     
     let token_price = OraclePrice::new_from_oracle(custody_oracle_account, curtime, false)?;
 
@@ -105,7 +101,7 @@ pub fn open_limit_option(ctx: Context<OpenLimitOption>, params: &OpenLimitOption
     require_gte!(
         locked_custody.token_owned,
         locked_custody.token_locked,
-        OptionError::InvalidPoolBalanceError
+        PoolError::InvalidPoolBalanceError
     );
 
     // store option data
@@ -124,6 +120,10 @@ pub fn open_limit_option(ctx: Context<OpenLimitOption>, params: &OpenLimitOption
     option_detail.custody = custody.key();
     option_detail.limit_price = f64_to_scaled_price(params.limit_price)?;
     option_detail.executed = false;
+    option_detail.entry_price = f64_to_scaled_price(oracle_price)?;
+    option_detail.last_update_time = curtime;
+    option_detail.take_profit_price = None;
+    option_detail.stop_loss_price = None;
     user.option_index = option_index;
 
     Ok(())

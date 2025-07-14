@@ -187,7 +187,7 @@ describe("Exercise Option Test - Based on Rust Code", () => {
         .signers([userWallet])
         .rpc();
 
-      console.log("✅ Exercise option transaction successful!");
+      console.log("Exercise option transaction successful!");
       console.log("Transaction signature:", exerciseOptionTx);
 
       // Wait for confirmation
@@ -287,21 +287,21 @@ describe("Exercise Option Test - Based on Rust Code", () => {
     // Validate each account
     try {
       await program.account.contract.fetch(contractPDA);
-      console.log("✅ Contract exists");
+      console.log("Contract exists");
     } catch (e) {
       throw new Error(`Contract missing: ${e.message}`);
     }
 
     try {
       const poolData = await program.account.pool.fetch(poolPDA);
-      console.log("✅ Pool exists:", poolData.name);
+      console.log("Pool exists:", poolData.name);
     } catch (e) {
       throw new Error(`Pool missing: ${e.message}`);
     }
 
     try {
       const userData = await program.account.user.fetch(userPDA);
-      console.log("✅ User exists, option index:", userData.optionIndex.toString());
+      console.log("User exists, option index:", userData.optionIndex.toString());
       expect(userData.optionIndex.toNumber()).to.be.gte(optionIndex);
     } catch (e) {
       throw new Error(`User missing: ${e.message}`);
@@ -309,7 +309,7 @@ describe("Exercise Option Test - Based on Rust Code", () => {
 
     try {
       const custodyData = await program.account.custody.fetch(custodyPDA);
-      console.log("✅ Custody exists");
+      console.log("Custody exists");
       console.log("  Mint:", custodyData.mint.toBase58());
       console.log("  Oracle:", custodyData.oracle.toBase58());
       console.log("  Token Locked:", custodyData.tokenLocked.toString());
@@ -319,7 +319,7 @@ describe("Exercise Option Test - Based on Rust Code", () => {
 
     try {
       const optionData = await program.account.optionDetail.fetch(optionDetailPDA);
-      console.log("✅ Option Detail exists");
+      console.log("Option Detail exists");
       console.log("  Valid:", optionData.valid);
       console.log("  Amount:", optionData.amount.toString());
       console.log("  Strike Price:", optionData.strikePrice);
@@ -330,6 +330,6 @@ describe("Exercise Option Test - Based on Rust Code", () => {
       throw new Error(`Option Detail missing: ${e.message}`);
     }
 
-    console.log("✅ All required accounts validated");
+    console.log("All required accounts validated");
   });
 });

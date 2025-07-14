@@ -1,5 +1,5 @@
 use crate::{
-    errors::{OptionError, TradingError},
+    errors::{OptionError, TradingError, PoolError},
     math::{self, f64_to_scaled_price},
     state::{Contract, Custody, OptionDetail, OraclePrice, Pool, User},
 };
@@ -65,7 +65,7 @@ pub fn open_option(ctx: Context<OpenOption>, params: &OpenOptionParams) -> Resul
     require_gte!(
         funding_account.amount,
         params.amount,
-        OptionError::InvalidSignerBalanceError
+        TradingError::InvalidSignerBalanceError
     );
 
     // Send Pay token from User to Pool Custody as premium
@@ -145,7 +145,7 @@ pub fn open_option(ctx: Context<OpenOption>, params: &OpenOptionParams) -> Resul
     require_gte!(
         locked_custody.token_owned,
         locked_custody.token_locked,
-        OptionError::InvalidPoolBalanceError
+        PoolError::InvalidPoolBalanceError
     );
 
     // store option data
@@ -163,7 +163,11 @@ pub fn open_option(ctx: Context<OpenOption>, params: &OpenOptionParams) -> Resul
     option_detail.pool = pool.key();
     option_detail.custody = custody.key();
     option_detail.limit_price = 0;
+    option_detail.executed = false;
     option_detail.entry_price = f64_to_scaled_price(oracle_price)?;
+    option_detail.last_update_time = curtime;
+    option_detail.take_profit_price = None;
+    option_detail.stop_loss_price = None;
     option_detail.bump = ctx.bumps.option_detail;  
     user.option_index = option_index;
 

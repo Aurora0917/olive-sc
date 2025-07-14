@@ -1,7 +1,7 @@
 use crate::{
-    errors::OptionError,
-    math::{self, f64_to_scaled_price, f64_to_scaled_ratio},
-    state::{Contract, Custody, OraclePrice, Pool, PerpPosition, PerpSide},
+    errors::{PerpetualError, TradingError},
+    math::{self, f64_to_scaled_price},
+    state::{Contract, Custody, OraclePrice, Pool, Position, Side, PositionType},
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
@@ -10,7 +10,7 @@ use anchor_spl::token::{Mint, Token, TokenAccount};
 pub struct RemoveCollateralParams {
     pub position_index: u64,
     pub pool_name: String,
-    pub collateral_amount: u64,  // Amount to remove from collateral (in position's collateral asset)
+    pub collateral_amount: u64,  // Amount to remove from collateral
     pub receive_sol: bool,       // true = receive SOL, false = receive USDC
 }
 
@@ -26,180 +26,181 @@ pub fn remove_collateral(
     let usdc_custody = &mut ctx.accounts.usdc_custody;
     
     // Validation
-    require_keys_eq!(position.owner, ctx.accounts.owner.key(), OptionError::Unauthorized);
-    require!(!position.is_liquidated, OptionError::PositionLiquidated);
-    require!(params.collateral_amount > 0, OptionError::InvalidAmount);
+    require_keys_eq!(position.owner, ctx.accounts.owner.key(), TradingError::Unauthorized);
+    require!(!position.is_liquidated, PerpetualError::PositionLiquidated);
+    require!(position.position_type == PositionType::Market, PerpetualError::InvalidPositionType);
+    require!(params.collateral_amount > 0, TradingError::InvalidAmount);
     require!(
         params.collateral_amount < position.collateral_amount,
-        OptionError::InvalidAmount
+        TradingError::InvalidAmount
     );
     
-    // Get current prices from oracles
+    // Get current prices
     let current_time = contract.get_time()?;
     let sol_price = OraclePrice::new_from_oracle(&ctx.accounts.sol_oracle_account, current_time, false)?;
     let usdc_price = OraclePrice::new_from_oracle(&ctx.accounts.usdc_oracle_account, current_time, false)?;
     
-    let current_sol_price = sol_price.get_price();
+    let sol_price_value = sol_price.get_price();
     let usdc_price_value = usdc_price.get_price();
+    let current_price_scaled = f64_to_scaled_price(sol_price_value)?;
     
-    msg!("SOL Price: {}", current_sol_price);
+    msg!("SOL Price: {}", sol_price_value);
     msg!("USDC Price: {}", usdc_price_value);
+    msg!("Removing {} tokens from collateral", params.collateral_amount);
     
-    // Determine position's collateral asset info
-    let position_collateral_is_sol = position.collateral_asset == position.sol_custody;
-    let (collateral_decimals, collateral_price) = if position_collateral_is_sol {
-        (sol_custody.decimals, current_sol_price)
+    // Determine collateral asset info
+    let (collateral_decimals, collateral_price) = if position.collateral_custody == sol_custody.key() {
+        (sol_custody.decimals, sol_price_value)
     } else {
         (usdc_custody.decimals, usdc_price_value)
     };
     
-    // Update position with current P&L first
-    position.update_position(current_sol_price, current_time, collateral_price)?;
+    // Calculate USD value of removed collateral
+    let collateral_usd_to_remove = math::checked_as_u64(math::checked_float_mul(
+        params.collateral_amount as f64 / math::checked_powi(10.0, collateral_decimals as i32)?,
+        collateral_price
+    )?)?;
     
-    msg!("Current P&L before removing collateral: ${}", position.unrealized_pnl as f64 / 1_000_000.0);
-    msg!("Current margin ratio: {}%", position.margin_ratio as f64 / 10_000.0);
-
-    // Calculate withdrawal amount in desired asset
-    let withdrawal_amount = if params.receive_sol {
-        // Same asset: direct withdrawal
-        math::checked_as_u64(params.collateral_amount as f64 * current_sol_price)?
-    } else {
-        math::checked_as_u64(params.collateral_amount as f64 * usdc_price_value * 1_000.0)?
-    };
+    msg!("Collateral USD to remove: {}", collateral_usd_to_remove);
+    msg!("Current collateral USD: {}", position.collateral_usd);
     
-    // Calculate new position metrics after collateral removal
-    let new_collateral_amount = math::checked_sub(position.collateral_amount, withdrawal_amount)?;
+    // Calculate new collateral amounts
+    let new_collateral_amount = math::checked_sub(position.collateral_amount, params.collateral_amount)?;
+    let new_collateral_usd = math::checked_sub(position.collateral_usd, collateral_usd_to_remove)?;
     
-    let position_value_sol = position.position_size as f64 / math::checked_powi(10.0, sol_custody.decimals as i32)?;
-    let position_value_usd = math::checked_float_mul(position_value_sol, position.entry_price as f64 / 1_000_000.0)?;
+    // Calculate new leverage and ensure it doesn't exceed limits
+    let new_leverage = math::checked_div(position.size_usd, new_collateral_usd)?;
+    require!(new_leverage <= Position::MAX_LEVERAGE, PerpetualError::InvalidLeverage);
     
-    let new_collateral_value_tokens = new_collateral_amount as f64 / math::checked_powi(10.0, collateral_decimals as i32)?;
-    let new_collateral_value_usd = math::checked_float_mul(new_collateral_value_tokens, collateral_price)?;
+    // Calculate new margin requirements
+    let new_initial_margin_bps = math::checked_div(10_000u64, new_leverage)?;
+    let new_maintenance_margin_bps = math::checked_div(new_initial_margin_bps, 2)?;
     
-    // Calculate new leverage and margin ratio
-    let new_leverage = math::checked_float_div(position_value_usd, new_collateral_value_usd)?;
-    let new_equity_usd = new_collateral_value_usd + (position.unrealized_pnl as f64 / 1_000_000.0);
-    let new_margin_ratio = math::checked_float_div(new_equity_usd, position_value_usd)?;
-    
-    // Validate new leverage and margin ratio are within safe limits
+    // Ensure new margin requirements meet minimum standards
     require!(
-        new_leverage <= PerpPosition::MAX_LEVERAGE as f64 / 1_000_000.0,
-        OptionError::InvalidLeverage
-    );
-    require!(
-        new_margin_ratio >= PerpPosition::MAINTENANCE_MARGIN as f64 / 1_000_000.0,
-        OptionError::InsufficientCollateral
+        new_initial_margin_bps >= Position::MIN_INITIAL_MARGIN_BPS,
+        PerpetualError::InvalidLeverage
     );
     
-    msg!("New leverage after removal: {}x", new_leverage);
-    msg!("New margin ratio after removal: {}%", new_margin_ratio * 100.0);
-    
-    // ============ LIQUIDATION PRICE UPDATE (ONLY NEW ADDITION) ============
-    let _maintenance_margin = PerpPosition::MAINTENANCE_MARGIN; // Usually 5% (0.05)
-    let liquidation_buffer = 0.005; // 0.5% buffer for safety
-    
-    // Calculate the new liquidation price with reduced collateral
-    let is_long = position.side == PerpSide::Long;
-    let entry_price = position.entry_price as f64 / 1_000_000.0;
-    let maintenance_margin_ratio = PerpPosition::MAINTENANCE_MARGIN as f64 / 1_000_000.0;
-    
-    let new_liquidation_price = if is_long {
-        // For LONG positions: liquidation when price drops
-        // At liquidation: new_collateral_value_usd + (liq_price - entry_price) * position_size_sol = maintenance_margin * position_value_usd
-        let required_equity = position_value_usd * maintenance_margin_ratio;
-        let equity_deficit = required_equity - new_collateral_value_usd;
-        let price_change_needed = equity_deficit / position_value_sol;
-        
-        let liq_price = entry_price + price_change_needed - liquidation_buffer;
-        f64::max(0.0, liq_price)
-    } else {
-        // For SHORT positions: liquidation when price rises
-        // At liquidation: new_collateral_value_usd + (entry_price - liq_price) * position_size_sol = maintenance_margin * position_value_usd
-        let required_equity = position_value_usd * maintenance_margin_ratio;
-        let equity_deficit = required_equity - new_collateral_value_usd;
-        let price_change_needed = equity_deficit / position_value_sol;
-        
-        entry_price - price_change_needed + liquidation_buffer
-    };
-    // ============ END OF LIQUIDATION PRICE UPDATE ============
-    
-    // Determine withdrawal accounts
-    let (from_account, to_account) = if params.receive_sol {
-        (&ctx.accounts.sol_custody_token_account, &ctx.accounts.user_sol_account)
-    } else {
-        (&ctx.accounts.usdc_custody_token_account, &ctx.accounts.user_usdc_account)
-    };
-    
-    msg!("Collateral amount to remove: {}", params.collateral_amount);
-    msg!("Withdrawal amount: {}", withdrawal_amount);
-    msg!("Receive asset: {}", if params.receive_sol { "SOL" } else { "USDC" });
-    
-    // Transfer collateral to user
-    let authority_bump = contract.transfer_authority_bump;
-    let signer_seeds: &[&[&[u8]]] = &[&[b"transfer_authority", &[authority_bump]]];
-    
-    anchor_spl::token::transfer(
-        CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
-            anchor_spl::token::Transfer {
-                from: from_account.to_account_info(),
-                to: to_account.to_account_info(),
-                authority: ctx.accounts.transfer_authority.to_account_info(),
-            },
-            signer_seeds,
-        ),
-        params.collateral_amount,
+    // Check if position would be liquidatable after removing collateral
+    let new_liquidation_price = calculate_liquidation_price(
+        position.price,
+        new_maintenance_margin_bps,
+        position.side
     )?;
     
-    // Update position with new collateral amount and metrics
-    position.collateral_amount = new_collateral_amount;
-    position.leverage = f64_to_scaled_ratio(new_leverage)?;
-    position.margin_ratio = f64_to_scaled_ratio(new_margin_ratio)?;
-    position.liquidation_price = f64_to_scaled_price(new_liquidation_price)?; // Update liquidation price
-    position.last_update_time = current_time;
+    // Ensure position won't be immediately liquidatable
+    let would_be_liquidatable = match position.side {
+        Side::Long => current_price_scaled <= new_liquidation_price,
+        Side::Short => current_price_scaled >= new_liquidation_price,
+    };
     
-    // Update custody stats based on withdrawal asset
-    if params.receive_sol {
-        sol_custody.token_owned = math::checked_sub(sol_custody.token_owned, withdrawal_amount)?;
-        
-        // If converting from USDC collateral to SOL withdrawal, handle conversion tracking
-        if !position_collateral_is_sol {
-            // Add back the USDC equivalent that was conceptually converted
-            let collateral_value_usd = params.collateral_amount as f64 / math::checked_powi(10.0, usdc_custody.decimals as i32)? * usdc_price_value;
-            let usdc_equivalent = math::checked_as_u64(
-                collateral_value_usd / usdc_price_value * math::checked_powi(10.0, usdc_custody.decimals as i32)?
-            )?;
-            usdc_custody.token_owned = math::checked_add(usdc_custody.token_owned, usdc_equivalent)?;
-            
-            msg!("Converted {} USDC collateral to {} SOL withdrawal", params.collateral_amount, withdrawal_amount);
-        }
+    require!(!would_be_liquidatable, PerpetualError::WouldCauseLiquidation);
+    
+    // Check margin ratio wouldn't be too low
+    let pnl = position.calculate_pnl(current_price_scaled)?;
+    let new_equity = if pnl >= 0 {
+        new_collateral_usd + pnl as u64
     } else {
-        usdc_custody.token_owned = math::checked_sub(usdc_custody.token_owned, withdrawal_amount)?;
-        
-        // If converting from SOL collateral to USDC withdrawal, handle conversion tracking
-        if position_collateral_is_sol {
-            // Add back the SOL equivalent that was conceptually converted
-            let collateral_value_usd = params.collateral_amount as f64 / math::checked_powi(10.0, sol_custody.decimals as i32)? * current_sol_price;
-            let sol_equivalent = math::checked_as_u64(
-                collateral_value_usd / current_sol_price * math::checked_powi(10.0, sol_custody.decimals as i32)?
-            )?;
-            sol_custody.token_owned = math::checked_add(sol_custody.token_owned, sol_equivalent)?;
-            
-            msg!("Converted {} SOL collateral to {} USDC withdrawal", params.collateral_amount, withdrawal_amount);
+        let loss = (-pnl) as u64;
+        if loss >= new_collateral_usd {
+            0
+        } else {
+            new_collateral_usd - loss
         }
+    };
+    
+    let new_margin_ratio_bps = math::checked_as_u64(math::checked_div(
+        math::checked_mul(new_equity as u128, 10_000u128)?,
+        position.size_usd as u128,
+    )?)?;
+    
+    require!(
+        new_margin_ratio_bps > new_maintenance_margin_bps + 100, // 1% buffer
+        PerpetualError::InsufficientMargin
+    );
+    
+    // Calculate withdrawal amount in requested asset
+    let (withdrawal_amount, withdrawal_decimals) = if params.receive_sol {
+        let amount = math::checked_as_u64(collateral_usd_to_remove as f64 / sol_price_value)?;
+        (amount, sol_custody.decimals)
+    } else {
+        let amount = math::checked_as_u64(collateral_usd_to_remove as f64 / usdc_price_value)?;
+        (amount, usdc_custody.decimals)
+    };
+    
+    let withdrawal_tokens = math::checked_as_u64(
+        withdrawal_amount as f64 * math::checked_powi(10.0, withdrawal_decimals as i32)?
+    )?;
+    
+    msg!("Withdrawal tokens: {}", withdrawal_tokens);
+    
+    // Transfer withdrawal to user
+    if withdrawal_tokens > 0 {
+        ctx.accounts.contract.transfer_tokens(
+            if params.receive_sol {
+                ctx.accounts.sol_custody_token_account.to_account_info()
+            } else {
+                ctx.accounts.usdc_custody_token_account.to_account_info()
+            },
+            ctx.accounts.receiving_account.to_account_info(),
+            ctx.accounts.transfer_authority.to_account_info(),
+            ctx.accounts.token_program.to_account_info(),
+            withdrawal_tokens,
+        )?;
     }
     
-    msg!("Collateral removed successfully");
-    msg!("Removed amount: {}", params.collateral_amount);
-    msg!("Withdrawal amount: {}", withdrawal_amount);
+    // Update custody stats
+    if position.collateral_custody == sol_custody.key() {
+        sol_custody.token_owned = math::checked_sub(
+            sol_custody.token_owned,
+            params.collateral_amount
+        )?;
+    } else {
+        usdc_custody.token_owned = math::checked_sub(
+            usdc_custody.token_owned,
+            params.collateral_amount
+        )?;
+    }
+    
+    // Update position
+    position.collateral_amount = new_collateral_amount;
+    position.collateral_usd = new_collateral_usd;
+    position.borrow_size_usd = position.size_usd.saturating_sub(position.collateral_usd);
+    position.initial_margin_bps = new_initial_margin_bps;
+    position.maintenance_margin_bps = new_maintenance_margin_bps;
+    position.liquidation_price = new_liquidation_price;
+    position.update_time = current_time;
+    
+    msg!("Successfully removed collateral");
     msg!("New collateral amount: {}", position.collateral_amount);
-    msg!("New leverage: {}x", position.leverage as f64 / 1_000_000.0);
-    msg!("New margin ratio: {}%", position.margin_ratio as f64 / 10_000.0);
-    msg!("New liquidation price: ${}", position.liquidation_price as f64 / 1_000_000.0); // Added log for new liquidation price
-    msg!("Position collateral asset: {}", if position_collateral_is_sol { "SOL" } else { "USDC" });
-    msg!("Received as: {}", if params.receive_sol { "SOL" } else { "USDC" });
+    msg!("New collateral USD: {}", position.collateral_usd);
+    msg!("New leverage: {}x", new_leverage);
+    msg!("New liquidation price: {}", position.liquidation_price);
+    msg!("New borrow size USD: {}", position.borrow_size_usd);
+    msg!("Withdrawal amount: {} tokens", withdrawal_tokens);
     
     Ok(())
+}
+
+fn calculate_liquidation_price(
+    entry_price: u64,
+    maintenance_margin_bps: u64,
+    side: Side
+) -> Result<u64> {
+    let entry_price_f64 = math::checked_float_div(entry_price as f64, crate::math::PRICE_SCALE as f64)?;
+    let margin_ratio = maintenance_margin_bps as f64 / 10_000.0;
+    
+    let liquidation_price_f64 = match side {
+        Side::Long => {
+            math::checked_float_mul(entry_price_f64, 1.0 - margin_ratio)?
+        },
+        Side::Short => {
+            math::checked_float_mul(entry_price_f64, 1.0 + margin_ratio)?
+        }
+    };
+    
+    f64_to_scaled_price(liquidation_price_f64)
 }
 
 #[derive(Accounts)]
@@ -210,19 +211,11 @@ pub struct RemoveCollateral<'info> {
 
     #[account(
         mut,
-        constraint = user_sol_account.mint == sol_custody.mint,
         has_one = owner
     )]
-    pub user_sol_account: Box<Account<'info, TokenAccount>>,
+    pub receiving_account: Box<Account<'info, TokenAccount>>,
 
-    #[account(
-        mut,
-        constraint = user_usdc_account.mint == usdc_custody.mint,
-        has_one = owner
-    )]
-    pub user_usdc_account: Box<Account<'info, TokenAccount>>,
-
-    /// CHECK: Transfer authority for custody token accounts
+    /// CHECK: Transfer authority PDA for contract token operations
     #[account(
         seeds = [b"transfer_authority"],
         bump = contract.transfer_authority_bump
@@ -245,14 +238,14 @@ pub struct RemoveCollateral<'info> {
     #[account(
         mut,
         seeds = [
-            b"perp_position",
+            b"position",
             owner.key().as_ref(),
             params.position_index.to_le_bytes().as_ref(),
             pool.key().as_ref()
         ],
         bump = position.bump
     )]
-    pub position: Box<Account<'info, PerpPosition>>,
+    pub position: Box<Account<'info, Position>>,
 
     #[account(
         mut,
@@ -290,12 +283,16 @@ pub struct RemoveCollateral<'info> {
     )]
     pub usdc_custody_token_account: Box<Account<'info, TokenAccount>>,
 
-    /// CHECK: SOL price oracle
-    #[account(constraint = sol_oracle_account.key() == sol_custody.oracle)]
+    /// CHECK: Oracle account validation is handled by constraint
+    #[account(
+        constraint = sol_oracle_account.key() == sol_custody.oracle
+    )]
     pub sol_oracle_account: AccountInfo<'info>,
 
-    /// CHECK: USDC price oracle
-    #[account(constraint = usdc_oracle_account.key() == usdc_custody.oracle)]
+    /// CHECK: Oracle account validation is handled by constraint
+    #[account(
+        constraint = usdc_oracle_account.key() == usdc_custody.oracle
+    )]
     pub usdc_oracle_account: AccountInfo<'info>,
 
     #[account(mut)]

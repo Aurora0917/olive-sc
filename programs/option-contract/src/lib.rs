@@ -104,6 +104,11 @@ pub mod option_contract {
         instructions::edit_option::edit_option(ctx, &params)
     }
 
+    // Set TP/SL for existing option
+    pub fn set_option_tp_sl(ctx: Context<SetOptionTpSl>, params: SetOptionTpSlParams) -> Result<()> {
+        instructions::set_option_tp_sl::set_option_tp_sl(ctx, &params)
+    }
+
     // Buy option from user to liquidity pool before expired time by user
     pub fn close_option(ctx: Context<CloseOption>, params: CloseOptionParams) -> Result<()> {
         instructions::close_option::close_option(ctx, &params)

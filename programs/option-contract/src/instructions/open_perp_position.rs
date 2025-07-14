@@ -1,30 +1,31 @@
 use crate::{
-    errors::OptionError,
-    math::{self, f64_to_scaled_price, f64_to_scaled_ratio},
-    state::{Contract, Custody, OraclePrice, Pool, User, OptionDetail, PerpPosition, PerpSide},
+    errors::{PerpetualError, TradingError, PoolError},
+    math::{self, f64_to_scaled_price},
+    state::{Contract, Custody, OraclePrice, Pool, User, Position, Side, PositionType},
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer as SplTransfer};
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct OpenPerpPositionParams {
-    pub collateral_amount: u64,  // Amount to use as collateral (in the collateral asset)
-    pub position_size: u64,      // SOL amount to trade (leveraged)
-    pub side: PerpSide,          // Long or Short
-    pub max_slippage: u64,       // Max acceptable price slippage in basis points (100 = 1%)
-    pub pool_name: String,       // Pool name (e.g., "SOL/USDC")
-    pub pay_sol: bool,           // true = pay with SOL, false = pay with USDC
-    pub pay_amount: u64,
-    // TP/SL Parameters
-    pub take_profit_price: Option<f64>,  // Optional take profit price
-    pub stop_loss_price: Option<f64>,    // Optional stop loss price
+    pub size_usd: u64,              // Position size in USD
+    pub collateral_amount: u64,     // Collateral amount in tokens
+    pub side: Side,                 // Long or Short
+    pub position_type: PositionType, // Market or Limit
+    pub trigger_price: Option<u64>, // For limit orders
+    pub trigger_above_threshold: bool, // Direction for limit orders
+    pub max_slippage: u64,          // Max acceptable slippage in basis points
+    pub pool_name: String,          // Pool name
+    pub pay_sol: bool,              // true = pay with SOL, false = pay with USDC
+    pub take_profit_price: Option<u64>, // Optional TP price
+    pub stop_loss_price: Option<u64>,   // Optional SL price
 }
 
 pub fn open_perp_position(
     ctx: Context<OpenPerpPosition>, 
     params: &OpenPerpPositionParams
 ) -> Result<()> {
-    msg!("Opening SOL/USDC perpetual position");
+    msg!("Opening perpetual position");
     
     let owner = &ctx.accounts.owner;
     let contract = &ctx.accounts.contract;
@@ -35,10 +36,10 @@ pub fn open_perp_position(
     let user = &mut ctx.accounts.user;
     
     // Basic validation
-    require!(params.collateral_amount > 0, OptionError::InvalidAmount);
-    require!(params.position_size > 0, OptionError::InvalidAmount);
-    require!(params.max_slippage <= 1000, OptionError::InvalidSlippage); // Max 10%
-    require!(!params.pool_name.is_empty(), OptionError::InvalidPoolName);
+    require!(params.size_usd > 0, TradingError::InvalidAmount);
+    require!(params.collateral_amount > 0, TradingError::InvalidAmount);
+    require!(params.max_slippage <= 1000, TradingError::InvalidSlippage); // Max 10%
+    require!(!params.pool_name.is_empty(), PoolError::InvalidPoolName);
     
     // Get current prices
     let current_time = contract.get_time()?;
@@ -53,106 +54,93 @@ pub fn open_perp_position(
         false
     )?;
     
-    msg!("SOL Price: {}", sol_price.get_price());
-    msg!("USDC Price: {}", usdc_price.get_price());
-    
     let sol_price_value = sol_price.get_price();
     let usdc_price_value = usdc_price.get_price();
     
-    // Determine collateral asset and custody based on position side and payment preference
-    let (collateral_custody, _collateral_token_account, collateral_decimals, _collateral_price) = 
-    match params.side {
-        PerpSide::Long => {
-            // Long with SOL collateral
-            (sol_custody.key(), &ctx.accounts.sol_custody_token_account, sol_custody.decimals, sol_price_value)
-        },
-        PerpSide::Short => {
-            // Short with USDC collateral (converted to SOL equivalent)
-            (usdc_custody.key(), &ctx.accounts.usdc_custody_token_account, usdc_custody.decimals, usdc_price_value)
-        },
-    };
-
+    msg!("SOL Price: {}", sol_price_value);
+    msg!("USDC Price: {}", usdc_price_value);
     
-    msg!("Sol Custody : {}", sol_custody.key());
-    msg!("USDC Custody : {}", usdc_custody.key());
+    // Determine collateral asset and custody
+    let (collateral_custody, collateral_decimals, collateral_price) = 
+        if params.pay_sol {
+            (sol_custody.key(), sol_custody.decimals, sol_price_value)
+        } else {
+            (usdc_custody.key(), usdc_custody.decimals, usdc_price_value)
+        };
     
-    // Calculate position value and leverage
-    let position_value_usd = params.position_size as f64 / math::checked_powi(10.0, sol_custody.decimals as i32)?;
+    // Calculate collateral value in USD
+    let collateral_usd = math::checked_as_u64(math::checked_float_mul(
+        params.collateral_amount as f64 / math::checked_powi(10.0, collateral_decimals as i32)?,
+        collateral_price
+    )?)?;
     
-    let collateral_value_usd = params.collateral_amount as f64 / math::checked_powi(10.0, collateral_decimals as i32)?;
-
+    // Calculate leverage
+    let leverage = math::checked_div(params.size_usd, collateral_usd)?;
     
-    let (token_locked, token_owned) = (sol_custody.token_locked, sol_custody.token_owned);
+    msg!("Position Size USD: {}", params.size_usd);
+    msg!("Collateral USD: {}", collateral_usd);
+    msg!("Leverage: {}x", leverage);
     
-    let borrow_rate = OptionDetail::get_sol_borrow_rate(token_locked, token_owned)?;
-    let leverage = math::checked_float_div(
-        position_value_usd * (1.0 - borrow_rate / 24.0 / 365.0), 
-        collateral_value_usd
-    )?;  
-    msg!("Position Value: ${}", position_value_usd);
-    msg!("Collateral Value: ${}", collateral_value_usd);
-    msg!("Calculated Leverage: {}x", leverage);
-    msg!("Pay Amount: {}x", params.pay_amount);
-    
-    // Validate leverage
+    // Validate leverage (250x max)
     require!(
-        leverage <= PerpPosition::MAX_LEVERAGE as f64 / 1_000_000.0 && leverage >= 1.0,
-        OptionError::InvalidLeverage
+        leverage <= Position::MAX_LEVERAGE && leverage >= 1,
+        PerpetualError::InvalidLeverage
     );
     
     // Check user has sufficient balance
     require_gte!(
         ctx.accounts.funding_account.amount,
         params.collateral_amount,
-        OptionError::InsufficientBalance
+        TradingError::InsufficientBalance
+    );
+    
+    // Calculate margin requirements
+    let initial_margin_bps = math::checked_div(10_000u64, leverage)?; // 10000 / leverage
+    let maintenance_margin_bps = math::checked_div(initial_margin_bps, 2)?; // Half of initial
+    
+    // Ensure minimum margin requirements
+    require!(
+        initial_margin_bps >= Position::MIN_INITIAL_MARGIN_BPS,
+        PerpetualError::InvalidLeverage
     );
     
     // Calculate liquidation price
+    let entry_price = if params.position_type == PositionType::Limit {
+        params.trigger_price.unwrap_or(f64_to_scaled_price(sol_price_value)?)
+    } else {
+        f64_to_scaled_price(sol_price_value)?
+    };
+    
     let liquidation_price = calculate_liquidation_price(
-        sol_price_value,
-        leverage,
+        entry_price,
+        maintenance_margin_bps,
         params.side
     )?;
     
-    msg!("Liquidation Price: ${}", liquidation_price);
+    msg!("Entry Price: {}", entry_price);
+    msg!("Liquidation Price: {}", liquidation_price);
     
-    // Validate liquidation price makes sense
-    match params.side {
-        PerpSide::Long => {
-            require!(
-                liquidation_price < sol_price_value,
-                OptionError::InvalidLiquidationPrice
-            );
-        },
-        PerpSide::Short => {
-            require!(
-                liquidation_price > sol_price_value,
-                OptionError::InvalidLiquidationPrice
-            );
-        }
-    }
+    // Check pool liquidity
+    let required_liquidity = if params.side == Side::Long {
+        // For longs, need SOL backing
+        math::checked_as_u64(params.size_usd as f64 / sol_price_value)?
+    } else {
+        // For shorts, need USDC backing
+        params.size_usd
+    };
     
-    // Check if we have enough liquidity in the pool
-    match params.side {
-        PerpSide::Long => {
-            // For long positions, we need SOL liquidity to back the position
-            require_gte!(
-                sol_custody.token_owned,
-                params.position_size,
-                OptionError::InsufficientPoolLiquidity
-            );
-        },
-        PerpSide::Short => {
-            // For short positions, we need USDC liquidity
-            let required_usdc = math::checked_as_u64(
-                position_value_usd * math::checked_powi(10.0, usdc_custody.decimals as i32)?
-            )?;
-            require_gte!(
-                usdc_custody.token_owned,
-                required_usdc,
-                OptionError::InsufficientPoolLiquidity
-            );
-        }
+    if params.side == Side::Long {
+        require_gte!(
+            sol_custody.token_owned,
+            required_liquidity,
+            TradingError::InsufficientPoolLiquidity
+        );
+    } else {
+        require_gte!(
+            usdc_custody.token_owned,
+            required_liquidity,
+            TradingError::InsufficientPoolLiquidity
+        );
     }
     
     // Transfer collateral from user to pool
@@ -169,63 +157,74 @@ pub fn open_perp_position(
                 authority: owner.to_account_info(),
             },
         ),
-        params.pay_amount,
+        params.collateral_amount,
     )?;
     
-    // Lock the corresponding assets in custody and update stats
-    match params.side {
-        PerpSide::Long => {
-            // Lock SOL tokens for long position
+    // Update custody stats
+    if params.pay_sol {
+        sol_custody.token_owned = math::checked_add(
+            sol_custody.token_owned,
+            params.collateral_amount
+        )?;
+        
+        if params.side == Side::Long {
             sol_custody.token_locked = math::checked_add(
-                sol_custody.token_locked, 
-                params.position_size
-            )?;
-        },
-        PerpSide::Short => {
-            // Lock USDC equivalent for short position  
-            let usdc_to_lock = math::checked_as_u64(
-                position_value_usd * math::checked_powi(10.0, usdc_custody.decimals as i32)?
-            )?;
-            usdc_custody.token_locked = math::checked_add(
-                usdc_custody.token_locked,
-                usdc_to_lock
+                sol_custody.token_locked,
+                required_liquidity
             )?;
         }
-    }
-    
-    // Update custody stats for the collateral asset
-    if params.side == PerpSide::Long {
-        sol_custody.token_owned = math::checked_add(
-            sol_custody.token_owned, 
-            params.collateral_amount
-        )?;
     } else {
         usdc_custody.token_owned = math::checked_add(
-            usdc_custody.token_owned, 
+            usdc_custody.token_owned,
             params.collateral_amount
         )?;
+        
+        if params.side == Side::Short {
+            usdc_custody.token_locked = math::checked_add(
+                usdc_custody.token_locked,
+                required_liquidity
+            )?;
+        }
     }
     
     // Initialize position
     position.owner = owner.key();
     position.pool = pool.key();
-    position.sol_custody = sol_custody.key();
-    position.usdc_custody = usdc_custody.key();
+    position.custody = sol_custody.key(); // Position always tracks SOL
+    position.collateral_custody = collateral_custody;
+    position.position_type = params.position_type;
     position.side = params.side;
-    position.collateral_amount = params.collateral_amount;
-    position.collateral_asset = collateral_custody;
-    position.position_size = params.position_size;
-    position.leverage = f64_to_scaled_ratio(leverage)?;
-    position.entry_price = f64_to_scaled_price(sol_price_value)?;
-    position.liquidation_price = f64_to_scaled_price(liquidation_price)?;
-    position.open_time = current_time;
-    position.last_update_time = current_time;
-    position.unrealized_pnl = 0;
-    position.margin_ratio = f64_to_scaled_ratio(1.0 / leverage)?; // Initial margin ratio
     position.is_liquidated = false;
+    position.price = entry_price;
+    position.size_usd = params.size_usd;
+    position.borrow_size_usd = params.size_usd - collateral_usd; // Borrowed amount
+    position.collateral_usd = collateral_usd;
+    position.open_time = current_time;
+    position.update_time = current_time;
+    position.liquidation_price = liquidation_price;
+    position.initial_margin_bps = initial_margin_bps;
+    position.maintenance_margin_bps = maintenance_margin_bps;
     
-    // Set TP/SL if provided
-    position.set_tp_sl(params.take_profit_price, params.stop_loss_price)?;
+    // Set snapshots (TODO: implement proper funding/interest tracking in pool)
+    position.cumulative_interest_snapshot = 0;
+    position.cumulative_funding_snapshot = 0;
+    
+    // Fee tracking
+    let opening_fee = math::checked_div(params.size_usd, 1000)?; // 0.1% opening fee
+    position.opening_fee_paid = opening_fee;
+    position.total_fees_paid = opening_fee;
+    
+    // Asset amounts
+    position.locked_amount = required_liquidity;
+    position.collateral_amount = params.collateral_amount;
+    
+    // TP/SL
+    position.take_profit_price = params.take_profit_price;
+    position.stop_loss_price = params.stop_loss_price;
+    
+    // Limit order specific
+    position.trigger_price = params.trigger_price;
+    position.trigger_above_threshold = params.trigger_above_threshold;
     
     position.bump = ctx.bumps.position;
     
@@ -233,41 +232,35 @@ pub fn open_perp_position(
     user.perp_position_count = user.perp_position_count.checked_add(1).unwrap_or(1);
     
     msg!("Successfully opened perpetual position");
-    msg!("Entry Price: ${}", position.entry_price);
-    msg!("Liquidation Price: ${}", position.liquidation_price);
-    msg!("Leverage: {}x", position.leverage);
-    msg!("Collateral Asset: {}", if params.pay_sol { "SOL" } else { "USDC" });
+    msg!("Position Type: {:?}", params.position_type);
+    msg!("Side: {:?}", params.side);
+    msg!("Size USD: {}", params.size_usd);
+    msg!("Collateral USD: {}", collateral_usd);
+    msg!("Leverage: {}x", leverage);
     
     Ok(())
 }
 
-// Helper function to calculate liquidation price
 fn calculate_liquidation_price(
-    entry_price: f64,
-    leverage: f64,
-    side: PerpSide
-) -> Result<f64> {
-    let liquidation_threshold = PerpPosition::LIQUIDATION_THRESHOLD; // 0.05%
+    entry_price: u64,
+    maintenance_margin_bps: u64,
+    side: Side
+) -> Result<u64> {
+    let entry_price_f64 = math::checked_float_div(entry_price as f64, crate::math::PRICE_SCALE as f64)?;
+    let margin_ratio = maintenance_margin_bps as f64 / 10_000.0;
     
-    // Calculate price movement to liquidation
-    let price_movement_ratio = math::checked_float_sub(1.0 / leverage, liquidation_threshold as f64 / 1_000_000.0)?;
-    
-    match side {
-        PerpSide::Long => {
-            // Long liquidation: price falls
-            math::checked_float_mul(
-                entry_price,
-                math::checked_float_sub(1.0, price_movement_ratio)?
-            )
+    let liquidation_price_f64 = match side {
+        Side::Long => {
+            // Long liquidation: price falls by margin ratio
+            math::checked_float_mul(entry_price_f64, 1.0 - margin_ratio)?
         },
-        PerpSide::Short => {
-            // Short liquidation: price rises  
-            math::checked_float_mul(
-                entry_price,
-                math::checked_float_add(1.0, price_movement_ratio)?
-            )
+        Side::Short => {
+            // Short liquidation: price rises by margin ratio
+            math::checked_float_mul(entry_price_f64, 1.0 + margin_ratio)?
         }
-    }
+    };
+    
+    f64_to_scaled_price(liquidation_price_f64)
 }
 
 #[derive(Accounts)]
@@ -280,9 +273,9 @@ pub struct OpenPerpPosition<'info> {
         mut,
         has_one = owner
     )]
-    pub funding_account: Box<Account<'info, TokenAccount>>, // User's payment account (SOL or USDC)
+    pub funding_account: Box<Account<'info, TokenAccount>>,
 
-    /// CHECK: empty PDA, authority for token accounts
+    /// CHECK: Program derived address (PDA) used as authority for token operations.
     #[account(
         seeds = [b"transfer_authority"],
         bump = contract.transfer_authority_bump
@@ -314,18 +307,17 @@ pub struct OpenPerpPosition<'info> {
     #[account(
         init,
         payer = owner,
-        space = PerpPosition::LEN,
+        space = Position::LEN,
         seeds = [
-            b"perp_position",
+            b"position",
             owner.key().as_ref(),
             (user.perp_position_count + 1).to_le_bytes().as_ref(),
             pool.key().as_ref()
         ],
         bump
     )]
-    pub position: Box<Account<'info, PerpPosition>>,
+    pub position: Box<Account<'info, Position>>,
 
-    // SOL custody (for position backing)
     #[account(
         mut,
         seeds = [b"custody", pool.key().as_ref(), sol_mint.key().as_ref()],
@@ -333,7 +325,6 @@ pub struct OpenPerpPosition<'info> {
     )]
     pub sol_custody: Box<Account<'info, Custody>>,
 
-    // USDC custody (for collateral)
     #[account(
         mut,
         seeds = [b"custody", pool.key().as_ref(), usdc_mint.key().as_ref()],
@@ -341,7 +332,6 @@ pub struct OpenPerpPosition<'info> {
     )]
     pub usdc_custody: Box<Account<'info, Custody>>,
 
-    // SOL token account (pool's SOL vault)
     #[account(
         mut,
         seeds = [
@@ -353,7 +343,6 @@ pub struct OpenPerpPosition<'info> {
     )]
     pub sol_custody_token_account: Box<Account<'info, TokenAccount>>,
 
-    // USDC token account (pool's USDC vault)
     #[account(
         mut,
         seeds = [
@@ -365,13 +354,13 @@ pub struct OpenPerpPosition<'info> {
     )]
     pub usdc_custody_token_account: Box<Account<'info, TokenAccount>>,
 
-    /// CHECK: SOL oracle account
+    /// CHECK: Oracle account validation is handled by constraint
     #[account(
         constraint = sol_oracle_account.key() == sol_custody.oracle
     )]
     pub sol_oracle_account: AccountInfo<'info>,
 
-    /// CHECK: USDC oracle account  
+    /// CHECK: Oracle account validation is handled by constraint
     #[account(
         constraint = usdc_oracle_account.key() == usdc_custody.oracle
     )]

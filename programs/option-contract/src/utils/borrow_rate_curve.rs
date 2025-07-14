@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 use crate::utils::*;
-use crate::errors::{MathError, PerpetualsError};
+use crate::errors::{MathError, PerpetualError};
 
 pub const MAX_UTILIZATION_RATE_BPS: u32 = FULL_BPS;
 
@@ -54,12 +54,12 @@ impl BorrowRateCurve {
 
         require!(
             pts[0].utilization_rate_bps == 0,
-            PerpetualsError::InvalidBorrowRateCurvePoint
+            PerpetualError::InvalidBorrowRateCurvePoint
         );
 
         require!(
             pts[10].utilization_rate_bps == MAX_UTILIZATION_RATE_BPS,
-            PerpetualsError::InvalidBorrowRateCurvePoint
+            PerpetualError::InvalidBorrowRateCurvePoint
         );
 
         let mut last_pt = pts[0];
@@ -67,18 +67,18 @@ impl BorrowRateCurve {
             if last_pt.utilization_rate_bps == MAX_UTILIZATION_RATE_BPS {
                 require!(
                     pt.utilization_rate_bps == MAX_UTILIZATION_RATE_BPS,
-                    PerpetualsError::InvalidBorrowRateCurvePoint
+                    PerpetualError::InvalidBorrowRateCurvePoint
                 );
             } else {
                 require!(
                     pt.utilization_rate_bps > last_pt.utilization_rate_bps,
-                    PerpetualsError::InvalidBorrowRateCurvePoint
+                    PerpetualError::InvalidBorrowRateCurvePoint
                 );
             }
             
             require!(
                 pt.borrow_rate_bps >= last_pt.borrow_rate_bps,
-                PerpetualsError::InvalidBorrowRateCurvePoint
+                PerpetualError::InvalidBorrowRateCurvePoint
             );
             
             last_pt = *pt;
@@ -87,13 +87,13 @@ impl BorrowRateCurve {
     }
 
     pub fn from_points(pts: &[CurvePoint]) -> Result<Self> {
-        require!(pts.len() >= 2, PerpetualsError::InvalidBorrowRateCurvePoint);
-        require!(pts.len() <= 11, PerpetualsError::InvalidBorrowRateCurvePoint);
+        require!(pts.len() >= 2, PerpetualError::InvalidBorrowRateCurvePoint);
+        require!(pts.len() <= 11, PerpetualError::InvalidBorrowRateCurvePoint);
         
         let last = pts.last().unwrap();
         require!(
             last.utilization_rate_bps == MAX_UTILIZATION_RATE_BPS,
-            PerpetualsError::InvalidBorrowRateCurvePoint
+            PerpetualError::InvalidBorrowRateCurvePoint
         );
 
         let mut points = [*last; 11];
@@ -152,7 +152,7 @@ impl BorrowRateCurve {
 
         let utilization_rate_bps = utilization_rate
             .to_bps()
-            .ok_or(MathError::OverflowMathError)?;
+            .ok_or(MathError::MathOverflow)?;
 
         for window in self.points.windows(2) {
             let start_pt = window[0];
@@ -172,33 +172,33 @@ impl BorrowRateCurve {
             }
         }
 
-        err!(PerpetualsError::InvalidUtilizationRate)
+        err!(PerpetualError::InvalidUtilizationRate)
     }
 
     fn interpolate(&self, start_pt: CurvePoint, end_pt: CurvePoint, utilization_rate: Fraction) -> Result<Fraction> {
         let slope_nom = end_pt.borrow_rate_bps
             .checked_sub(start_pt.borrow_rate_bps)
-            .ok_or(PerpetualsError::InvalidBorrowRateCurvePoint)?;
+            .ok_or(PerpetualError::InvalidBorrowRateCurvePoint)?;
 
         let slope_denom = end_pt.utilization_rate_bps
             .checked_sub(start_pt.utilization_rate_bps)
-            .ok_or(PerpetualsError::InvalidBorrowRateCurvePoint)?;
+            .ok_or(PerpetualError::InvalidBorrowRateCurvePoint)?;
 
         let start_utilization_rate = Fraction::from_bps(start_pt.utilization_rate_bps);
         let coef = utilization_rate
             .checked_sub(start_utilization_rate)
-            .ok_or(PerpetualsError::InvalidUtilizationRate)?;
+            .ok_or(PerpetualError::InvalidUtilizationRate)?;
 
         let nom = coef
             .checked_mul(slope_nom as u128)
-            .ok_or(MathError::OverflowMathError)?;
+            .ok_or(MathError::MathOverflow)?;
         let base_rate = nom
             .checked_div(slope_denom as u128)
-            .ok_or(MathError::OverflowMathError)?;
+            .ok_or(MathError::MathOverflow)?;
 
         let offset = Fraction::from_bps(start_pt.borrow_rate_bps);
         base_rate
             .checked_add(offset)
-            .ok_or(MathError::OverflowMathError.into())
+            .ok_or(MathError::MathOverflow.into())
     }
 }
