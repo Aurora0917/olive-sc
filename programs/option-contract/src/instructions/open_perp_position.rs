@@ -1,6 +1,6 @@
 use crate::{
     errors::OptionError,
-    math,
+    math::{self, f64_to_scaled_price, f64_to_scaled_ratio},
     state::{Contract, Custody, OraclePrice, Pool, User, OptionDetail, PerpPosition, PerpSide},
 };
 use anchor_lang::prelude::*;
@@ -15,6 +15,9 @@ pub struct OpenPerpPositionParams {
     pub pool_name: String,       // Pool name (e.g., "SOL/USDC")
     pub pay_sol: bool,           // true = pay with SOL, false = pay with USDC
     pub pay_amount: u64,
+    // TP/SL Parameters
+    pub take_profit_price: Option<f64>,  // Optional take profit price
+    pub stop_loss_price: Option<f64>,    // Optional stop loss price
 }
 
 pub fn open_perp_position(
@@ -57,7 +60,7 @@ pub fn open_perp_position(
     let usdc_price_value = usdc_price.get_price();
     
     // Determine collateral asset and custody based on position side and payment preference
-    let (collateral_custody, collateral_token_account, collateral_decimals, collateral_price) = 
+    let (collateral_custody, _collateral_token_account, collateral_decimals, _collateral_price) = 
     match params.side {
         PerpSide::Long => {
             // Long with SOL collateral
@@ -93,7 +96,7 @@ pub fn open_perp_position(
     
     // Validate leverage
     require!(
-        leverage <= PerpPosition::MAX_LEVERAGE && leverage >= 1.0,
+        leverage <= PerpPosition::MAX_LEVERAGE as f64 / 1_000_000.0 && leverage >= 1.0,
         OptionError::InvalidLeverage
     );
     
@@ -212,14 +215,18 @@ pub fn open_perp_position(
     position.collateral_amount = params.collateral_amount;
     position.collateral_asset = collateral_custody;
     position.position_size = params.position_size;
-    position.leverage = leverage;
-    position.entry_price = sol_price_value;
-    position.liquidation_price = liquidation_price;
+    position.leverage = f64_to_scaled_ratio(leverage)?;
+    position.entry_price = f64_to_scaled_price(sol_price_value)?;
+    position.liquidation_price = f64_to_scaled_price(liquidation_price)?;
     position.open_time = current_time;
     position.last_update_time = current_time;
     position.unrealized_pnl = 0;
-    position.margin_ratio = 1.0 / leverage; // Initial margin ratio
+    position.margin_ratio = f64_to_scaled_ratio(1.0 / leverage)?; // Initial margin ratio
     position.is_liquidated = false;
+    
+    // Set TP/SL if provided
+    position.set_tp_sl(params.take_profit_price, params.stop_loss_price)?;
+    
     position.bump = ctx.bumps.position;
     
     // Update user stats
@@ -243,7 +250,7 @@ fn calculate_liquidation_price(
     let liquidation_threshold = PerpPosition::LIQUIDATION_THRESHOLD; // 0.05%
     
     // Calculate price movement to liquidation
-    let price_movement_ratio = math::checked_float_sub(1.0 / leverage, liquidation_threshold)?;
+    let price_movement_ratio = math::checked_float_sub(1.0 / leverage, liquidation_threshold as f64 / 1_000_000.0)?;
     
     match side {
         PerpSide::Long => {

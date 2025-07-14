@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use crate::{utils::borrow_rate_curve::*, utils::Fraction, errors::OptionError, math};
+use crate::{utils::borrow_rate_curve::*, utils::Fraction, math::{self, scaled_price_to_f64}};
 
 #[account]
 pub struct OptionDetail {
@@ -7,7 +7,7 @@ pub struct OptionDetail {
     pub owner: Pubkey,
     pub amount: u64,
     pub quantity: u64,
-    pub strike_price: f64,
+    pub strike_price: u64,        // Strike price scaled by 1e6 (6 decimals)
     pub period: u64,
     pub expired_date: i64,
     pub purchase_date: u64,
@@ -30,13 +30,13 @@ pub struct OptionDetail {
     pub executed: bool,
     
     // NEW FIELD
-    pub entry_price: f64,     // Underlying asset price when option was purchased
+    pub entry_price: u64,     // Underlying asset price when option was purchased (scaled by 1e6)
     pub last_update_time: i64, // Last time option was updated
 }
 
 impl OptionDetail {
-    // Updated length calculation: added 8 bytes for entry_price (f64) + 8 bytes for last_update_time (i64)
-    pub const LEN: usize = 8 * 15 + 1 * 4 + 32 * 5 + 8;
+    // Updated length calculation: added 8 bytes for entry_price (u64) + 8 bytes for last_update_time (i64)
+    pub const LEN: usize = 8 * 15 + 4 + 32 * 5 + 8;
 
     pub fn normal_cdf(z: f64) -> f64 {
         let beta1 = -0.0004406;
@@ -171,9 +171,11 @@ impl OptionDetail {
         }
 
         // Calculate current option value using Black-Scholes with dynamic rates
+        // Convert scaled strike price back to f64 for calculation
+        let strike_price_f64 = scaled_price_to_f64(self.strike_price)?;
         let current_option_value = Self::black_scholes_with_borrow_rate(
             current_price,
-            self.strike_price,
+            strike_price_f64,
             time_to_expiry,
             self.option_type == 0, // 0 = call, 1 = put
             token_locked,
@@ -181,9 +183,15 @@ impl OptionDetail {
             is_sol
         )?;
 
-        // Calculate profit/loss
-        // Convert current_option_value to the same scale as premium
-        let current_value_scaled = (current_option_value * 1_000_000.0) as u64; // Assume 6 decimals
+        // Calculate profit/loss using proper decimal math
+        // Use the same scaling as the premium asset to avoid precision loss
+        let current_value_scaled = math::checked_decimal_mul(
+            math::checked_as_u64(current_option_value * 1_000_000.0)?, // Convert to micro units
+            -6, // micro decimals
+            1,
+            0,
+            -6, // target 6 decimals to match common stablecoin precision
+        )?;
         
         if current_value_scaled > self.premium {
             self.profit = current_value_scaled - self.premium;

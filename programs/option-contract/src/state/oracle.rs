@@ -30,10 +30,11 @@ impl PartialOrd for OraclePrice {
 
 #[allow(dead_code)]
 impl OraclePrice {
-    pub const MAX_PRICE_AGE_SEC: u64 = 86400; // 5 minutes - increased for more flexibility
+    pub const MAX_PRICE_AGE_SEC: u64 = 300; // 5 minutes - strict for options trading
     pub const ORACLE_MAX_PRICE: u64 = (1 << 28) - 1;
     pub const ORACLE_EXPONENT_SCALE: i32 = -9;
     pub const ORACLE_PRICE_SCALE: u64 = 1_000_000_000;
+    pub const MAX_CONFIDENCE_INTERVAL_BPS: u64 = 500; // 5% max confidence interval
     
     pub fn new(price: u64, exponent: i32) -> Self {
         Self { price, exponent }
@@ -47,8 +48,7 @@ impl OraclePrice {
     }
     
     pub fn get_price(&self) -> f64 {
-        let oracle_price = (self.price as f64) * 10f64.powi(self.exponent);
-        oracle_price
+        (self.price as f64) * 10f64.powi(self.exponent)
     }
     
     /// Get price from Pyth PriceUpdateV2 account
@@ -100,16 +100,26 @@ impl OraclePrice {
             ContractError::StaleOraclePrice
         );
         
+        // Validate price confidence - confidence should be reasonable relative to price
+        let confidence_bps = if price_message.price > 0 {
+            ((price_message.conf as u128 * 10000) / price_message.price as u128) as u64
+        } else {
+            u64::MAX // Invalid if price is zero
+        };
+        require!(
+            confidence_bps <= Self::MAX_CONFIDENCE_INTERVAL_BPS,
+            ContractError::LowConfidencePrice
+        );
+        
         msg!("Pyth price: {}, exponent: {}, confidence: {}, age: {} seconds", 
              price_message.price, price_message.exponent, price_message.conf, age);
         
-        // Handle negative prices by taking absolute value
-        let price_value = if price_message.price < 0 {
-            msg!("Warning: Negative price detected, using absolute value");
-            (-price_message.price) as u64
-        } else {
-            price_message.price as u64
-        };
+        // Reject negative prices - this indicates oracle failure
+        require!(
+            price_message.price > 0,
+            ContractError::InvalidOraclePrice
+        );
+        let price_value = price_message.price as u64;
         
         Ok(OraclePrice {
             price: price_value,
@@ -264,8 +274,8 @@ impl OraclePrice {
 
         let clock = Clock::get()?;
         
-        // Extract the feed ID from the price message
-        let feed_id = &price_update.price_message.feed_id;
+        // Extract the feed ID from the price message (available for debugging)
+        let _feed_id = &price_update.price_message.feed_id;
         
         // Get price with staleness check - using the struct methods
         let price_message = &price_update.price_message;
@@ -277,17 +287,27 @@ impl OraclePrice {
             ContractError::StaleOraclePrice
         );
         
+        // Validate price confidence - confidence should be reasonable relative to price
+        let confidence_bps = if price_message.price > 0 {
+            ((price_message.conf as u128 * 10000) / price_message.price as u128) as u64
+        } else {
+            u64::MAX // Invalid if price is zero
+        };
+        require!(
+            confidence_bps <= Self::MAX_CONFIDENCE_INTERVAL_BPS,
+            ContractError::LowConfidencePrice
+        );
+        
         msg!("Pyth price: {}, exponent: {}, confidence: {}, age: {} seconds", 
              price_message.price, price_message.exponent, price_message.conf,
              age);
         
-        // Handle negative prices by taking absolute value
-        let price_value = if price_message.price < 0 {
-            msg!("Warning: Negative price detected, using absolute value");
-            (-price_message.price) as u64
-        } else {
-            price_message.price as u64
-        };
+        // Reject negative prices - this indicates oracle failure
+        require!(
+            price_message.price > 0,
+            ContractError::InvalidOraclePrice
+        );
+        let price_value = price_message.price as u64;
         
         Ok(OraclePrice {
             price: price_value,
@@ -347,17 +367,27 @@ impl OraclePrice {
             ContractError::StaleOraclePrice
         );
         
+        // Validate price confidence - confidence should be reasonable relative to price
+        let confidence_bps = if price_message.price > 0 {
+            ((price_message.conf as u128 * 10000) / price_message.price as u128) as u64
+        } else {
+            u64::MAX // Invalid if price is zero
+        };
+        require!(
+            confidence_bps <= Self::MAX_CONFIDENCE_INTERVAL_BPS,
+            ContractError::LowConfidencePrice
+        );
+        
         msg!("Pyth price for feed {}: {}, exponent: {}, confidence: {}, age: {} seconds", 
              feed_id_hex, price_message.price, price_message.exponent, price_message.conf,
              age);
         
-        // Handle negative prices by taking absolute value
-        let price_value = if price_message.price < 0 {
-            msg!("Warning: Negative price detected, using absolute value");
-            (-price_message.price) as u64
-        } else {
-            price_message.price as u64
-        };
+        // Reject negative prices - this indicates oracle failure
+        require!(
+            price_message.price > 0,
+            ContractError::InvalidOraclePrice
+        );
+        let price_value = price_message.price as u64;
         
         Ok(OraclePrice {
             price: price_value,

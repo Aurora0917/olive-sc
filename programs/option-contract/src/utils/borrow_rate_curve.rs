@@ -1,7 +1,6 @@
 use anchor_lang::prelude::*;
 use crate::utils::*;
-use crate::errors::OptionError;
-use crate::errors::MathError;
+use crate::errors::{MathError, PerpetualsError};
 
 pub const MAX_UTILIZATION_RATE_BPS: u32 = FULL_BPS;
 
@@ -55,12 +54,12 @@ impl BorrowRateCurve {
 
         require!(
             pts[0].utilization_rate_bps == 0,
-            OptionError::InvalidBorrowRateCurvePoint
+            PerpetualsError::InvalidBorrowRateCurvePoint
         );
 
         require!(
             pts[10].utilization_rate_bps == MAX_UTILIZATION_RATE_BPS,
-            OptionError::InvalidBorrowRateCurvePoint
+            PerpetualsError::InvalidBorrowRateCurvePoint
         );
 
         let mut last_pt = pts[0];
@@ -68,18 +67,18 @@ impl BorrowRateCurve {
             if last_pt.utilization_rate_bps == MAX_UTILIZATION_RATE_BPS {
                 require!(
                     pt.utilization_rate_bps == MAX_UTILIZATION_RATE_BPS,
-                    OptionError::InvalidBorrowRateCurvePoint
+                    PerpetualsError::InvalidBorrowRateCurvePoint
                 );
             } else {
                 require!(
                     pt.utilization_rate_bps > last_pt.utilization_rate_bps,
-                    OptionError::InvalidBorrowRateCurvePoint
+                    PerpetualsError::InvalidBorrowRateCurvePoint
                 );
             }
             
             require!(
                 pt.borrow_rate_bps >= last_pt.borrow_rate_bps,
-                OptionError::InvalidBorrowRateCurvePoint
+                PerpetualsError::InvalidBorrowRateCurvePoint
             );
             
             last_pt = *pt;
@@ -88,13 +87,13 @@ impl BorrowRateCurve {
     }
 
     pub fn from_points(pts: &[CurvePoint]) -> Result<Self> {
-        require!(pts.len() >= 2, OptionError::InvalidBorrowRateCurvePoint);
-        require!(pts.len() <= 11, OptionError::InvalidBorrowRateCurvePoint);
+        require!(pts.len() >= 2, PerpetualsError::InvalidBorrowRateCurvePoint);
+        require!(pts.len() <= 11, PerpetualsError::InvalidBorrowRateCurvePoint);
         
         let last = pts.last().unwrap();
         require!(
             last.utilization_rate_bps == MAX_UTILIZATION_RATE_BPS,
-            OptionError::InvalidBorrowRateCurvePoint
+            PerpetualsError::InvalidBorrowRateCurvePoint
         );
 
         let mut points = [*last; 11];
@@ -173,22 +172,22 @@ impl BorrowRateCurve {
             }
         }
 
-        err!(OptionError::InvalidUtilizationRate)
+        err!(PerpetualsError::InvalidUtilizationRate)
     }
 
     fn interpolate(&self, start_pt: CurvePoint, end_pt: CurvePoint, utilization_rate: Fraction) -> Result<Fraction> {
         let slope_nom = end_pt.borrow_rate_bps
             .checked_sub(start_pt.borrow_rate_bps)
-            .ok_or(OptionError::InvalidBorrowRateCurvePoint)?;
+            .ok_or(PerpetualsError::InvalidBorrowRateCurvePoint)?;
 
         let slope_denom = end_pt.utilization_rate_bps
             .checked_sub(start_pt.utilization_rate_bps)
-            .ok_or(OptionError::InvalidBorrowRateCurvePoint)?;
+            .ok_or(PerpetualsError::InvalidBorrowRateCurvePoint)?;
 
         let start_utilization_rate = Fraction::from_bps(start_pt.utilization_rate_bps);
         let coef = utilization_rate
             .checked_sub(start_utilization_rate)
-            .ok_or(OptionError::InvalidUtilizationRate)?;
+            .ok_or(PerpetualsError::InvalidUtilizationRate)?;
 
         let nom = coef
             .checked_mul(slope_nom as u128)

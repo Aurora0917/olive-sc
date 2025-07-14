@@ -23,7 +23,7 @@ pub fn claim_option(ctx: Context<ClaimOption>, params: &ClaimOptionParams) -> Re
     let transfer_authority = &mut ctx.accounts.transfer_authority;
     let locked_custody = &mut ctx.accounts.locked_custody;
     let locked_custody_token_account = &mut ctx.accounts.locked_custody_token_account;
-    let locked_oracle = &ctx.accounts.locked_oracle;
+    let _locked_oracle = &ctx.accounts.locked_oracle;
     let funding_account = &mut ctx.accounts.funding_account;
 
     // ✅ VALIDATION CHECKS

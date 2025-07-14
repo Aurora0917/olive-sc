@@ -1,6 +1,6 @@
 use crate::{
     errors::OptionError,
-    math,
+    math::{self, scaled_price_to_f64},
     state::{Contract, Custody, OptionDetail, OraclePrice, Pool, User},
 };
 use anchor_lang::prelude::*;
@@ -30,7 +30,7 @@ pub fn close_option(ctx: Context<CloseOption>, params: &CloseOptionParams) -> Re
     let pay_custody = &mut ctx.accounts.pay_custody;
     let locked_custody_token_account = &ctx.accounts.locked_custody_token_account;
     let funding_account = &ctx.accounts.funding_account;
-    let pay_custody_oracle_account = &ctx.accounts.pay_custody_oracle_account;
+    let _pay_custody_oracle_account = &ctx.accounts.pay_custody_oracle_account;
     let custody_oracle_account = &ctx.accounts.custody_oracle_account;
     let locked_oracle = &ctx.accounts.locked_oracle;
 
@@ -45,7 +45,7 @@ pub fn close_option(ctx: Context<CloseOption>, params: &CloseOptionParams) -> Re
     // Only if option is valid and not exercised
     if option_detail.valid {
         // Get current time and check that option has not expired
-        let current_time: i64 = contract.get_time()? as i64;
+        let current_time: i64 = contract.get_time()?;
         if current_time >= option_detail.expired_date {
             return Err(OptionError::InvalidTimeError.into());
         }
@@ -64,7 +64,7 @@ pub fn close_option(ctx: Context<CloseOption>, params: &CloseOptionParams) -> Re
         );
 
         // Time decay logic for Black-Scholes
-        let remaining_seconds = option_detail.expired_date.saturating_sub(current_time as i64);
+        let remaining_seconds = option_detail.expired_date.saturating_sub(current_time);
         let remaining_days = remaining_seconds as f64 / 86400.0;
         let remaining_years = remaining_days / 365.0;
 
@@ -81,7 +81,7 @@ pub fn close_option(ctx: Context<CloseOption>, params: &CloseOptionParams) -> Re
         // Calculate Premium using enhanced Black-Scholes with dynamic borrow rate
         let bs_price_per_contract = OptionDetail::black_scholes_with_borrow_rate(
             underlying_price,
-            option_detail.strike_price,
+            scaled_price_to_f64(option_detail.strike_price)?,
             remaining_years,
             option_detail.option_type == 0, // call/put logic
             token_locked,  // Current utilization of underlying asset
@@ -180,7 +180,7 @@ pub fn close_option(ctx: Context<CloseOption>, params: &CloseOptionParams) -> Re
                 closed_option_detail.quantity = params.close_quantity;
                 closed_option_detail.amount = unlock_amount;
                 closed_option_detail.owner = option_detail.owner;
-                closed_option_detail.index = closed_option_detail.index;
+                closed_option_detail.index = option_detail.index;
                 closed_option_detail.period = option_detail.period;
                 closed_option_detail.expired_date = option_detail.expired_date;
                 closed_option_detail.purchase_date = option_detail.purchase_date;

@@ -1,6 +1,6 @@
 use crate::{
     errors::OptionError,
-    math,
+    math::{self, f64_to_scaled_price, f64_to_scaled_ratio},
     state::{Contract, Custody, OraclePrice, Pool, PerpPosition, PerpSide},
 };
 use anchor_lang::prelude::*;
@@ -57,10 +57,10 @@ pub fn remove_collateral(
     position.update_position(current_sol_price, current_time, collateral_price)?;
     
     msg!("Current P&L before removing collateral: ${}", position.unrealized_pnl as f64 / 1_000_000.0);
-    msg!("Current margin ratio: {}%", position.margin_ratio * 100.0);
+    msg!("Current margin ratio: {}%", position.margin_ratio as f64 / 10_000.0);
 
     // Calculate withdrawal amount in desired asset
-    let withdrawal_amount = if params.receive_sol == true {
+    let withdrawal_amount = if params.receive_sol {
         // Same asset: direct withdrawal
         math::checked_as_u64(params.collateral_amount as f64 * current_sol_price)?
     } else {
@@ -71,7 +71,7 @@ pub fn remove_collateral(
     let new_collateral_amount = math::checked_sub(position.collateral_amount, withdrawal_amount)?;
     
     let position_value_sol = position.position_size as f64 / math::checked_powi(10.0, sol_custody.decimals as i32)?;
-    let position_value_usd = math::checked_float_mul(position_value_sol, position.entry_price)?;
+    let position_value_usd = math::checked_float_mul(position_value_sol, position.entry_price as f64 / 1_000_000.0)?;
     
     let new_collateral_value_tokens = new_collateral_amount as f64 / math::checked_powi(10.0, collateral_decimals as i32)?;
     let new_collateral_value_usd = math::checked_float_mul(new_collateral_value_tokens, collateral_price)?;
@@ -83,11 +83,11 @@ pub fn remove_collateral(
     
     // Validate new leverage and margin ratio are within safe limits
     require!(
-        new_leverage <= PerpPosition::MAX_LEVERAGE,
+        new_leverage <= PerpPosition::MAX_LEVERAGE as f64 / 1_000_000.0,
         OptionError::InvalidLeverage
     );
     require!(
-        new_margin_ratio >= PerpPosition::MAINTENANCE_MARGIN,
+        new_margin_ratio >= PerpPosition::MAINTENANCE_MARGIN as f64 / 1_000_000.0,
         OptionError::InsufficientCollateral
     );
     
@@ -95,17 +95,18 @@ pub fn remove_collateral(
     msg!("New margin ratio after removal: {}%", new_margin_ratio * 100.0);
     
     // ============ LIQUIDATION PRICE UPDATE (ONLY NEW ADDITION) ============
-    let maintenance_margin = PerpPosition::MAINTENANCE_MARGIN; // Usually 5% (0.05)
+    let _maintenance_margin = PerpPosition::MAINTENANCE_MARGIN; // Usually 5% (0.05)
     let liquidation_buffer = 0.005; // 0.5% buffer for safety
     
     // Calculate the new liquidation price with reduced collateral
     let is_long = position.side == PerpSide::Long;
-    let entry_price = position.entry_price;
+    let entry_price = position.entry_price as f64 / 1_000_000.0;
+    let maintenance_margin_ratio = PerpPosition::MAINTENANCE_MARGIN as f64 / 1_000_000.0;
     
     let new_liquidation_price = if is_long {
         // For LONG positions: liquidation when price drops
         // At liquidation: new_collateral_value_usd + (liq_price - entry_price) * position_size_sol = maintenance_margin * position_value_usd
-        let required_equity = position_value_usd * maintenance_margin;
+        let required_equity = position_value_usd * maintenance_margin_ratio;
         let equity_deficit = required_equity - new_collateral_value_usd;
         let price_change_needed = equity_deficit / position_value_sol;
         
@@ -114,7 +115,7 @@ pub fn remove_collateral(
     } else {
         // For SHORT positions: liquidation when price rises
         // At liquidation: new_collateral_value_usd + (entry_price - liq_price) * position_size_sol = maintenance_margin * position_value_usd
-        let required_equity = position_value_usd * maintenance_margin;
+        let required_equity = position_value_usd * maintenance_margin_ratio;
         let equity_deficit = required_equity - new_collateral_value_usd;
         let price_change_needed = equity_deficit / position_value_sol;
         
@@ -152,9 +153,9 @@ pub fn remove_collateral(
     
     // Update position with new collateral amount and metrics
     position.collateral_amount = new_collateral_amount;
-    position.leverage = new_leverage;
-    position.margin_ratio = new_margin_ratio;
-    position.liquidation_price = new_liquidation_price; // Update liquidation price
+    position.leverage = f64_to_scaled_ratio(new_leverage)?;
+    position.margin_ratio = f64_to_scaled_ratio(new_margin_ratio)?;
+    position.liquidation_price = f64_to_scaled_price(new_liquidation_price)?; // Update liquidation price
     position.last_update_time = current_time;
     
     // Update custody stats based on withdrawal asset
@@ -192,9 +193,9 @@ pub fn remove_collateral(
     msg!("Removed amount: {}", params.collateral_amount);
     msg!("Withdrawal amount: {}", withdrawal_amount);
     msg!("New collateral amount: {}", position.collateral_amount);
-    msg!("New leverage: {}x", position.leverage);
-    msg!("New margin ratio: {}%", position.margin_ratio * 100.0);
-    msg!("New liquidation price: ${}", position.liquidation_price); // Added log for new liquidation price
+    msg!("New leverage: {}x", position.leverage as f64 / 1_000_000.0);
+    msg!("New margin ratio: {}%", position.margin_ratio as f64 / 10_000.0);
+    msg!("New liquidation price: ${}", position.liquidation_price as f64 / 1_000_000.0); // Added log for new liquidation price
     msg!("Position collateral asset: {}", if position_collateral_is_sol { "SOL" } else { "USDC" });
     msg!("Received as: {}", if params.receive_sol { "SOL" } else { "USDC" });
     

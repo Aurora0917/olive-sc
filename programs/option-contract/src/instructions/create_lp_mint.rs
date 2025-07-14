@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use anchor_spl::{token::{Mint, Token}, token_interface::{token_metadata_initialize, TokenMetadataInitialize}};
+use anchor_spl::token::{Mint, Token};
 
 use crate::state::Contract;
 

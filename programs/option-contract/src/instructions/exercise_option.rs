@@ -1,6 +1,6 @@
 use crate::{
     errors::OptionError,
-    math,
+    math::{self, scaled_price_to_f64},
     state::{Contract, Custody, OptionDetail, OraclePrice, Pool, User},
 };
 use anchor_lang::prelude::*;
@@ -57,7 +57,7 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, params: &ExerciseOptionPara
     // Check if option is available to exercise, before expired time.
     require_gt!(
         option_detail.expired_date,
-        current_timestamp as i64,
+        current_timestamp,
         OptionError::InvalidTimeError
     );
 
@@ -75,15 +75,16 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, params: &ExerciseOptionPara
 
     if custody.key() == locked_custody.key() {
         // call option
+        let strike_price_f64 = scaled_price_to_f64(option_detail.strike_price)?;
         require_gte!(
             oracle_price,
-            option_detail.strike_price,
+            strike_price_f64,
             OptionError::InvalidPriceRequirementError
         );
         
         // Calculate profit amount for call option: (oracle_price - strike_price) * quantity
         // Using safe decimal math to handle precision properly
-        let price_diff = math::checked_as_u64(oracle_price - option_detail.strike_price)?;
+        let price_diff = math::checked_as_u64(oracle_price - strike_price_f64)?;
         let amount = math::checked_decimal_mul(
             price_diff,
             0, // oracle price exponent (assuming normalized)
@@ -114,15 +115,16 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, params: &ExerciseOptionPara
 
         option_detail.profit = profit_per_unit;
     } else {
+        let strike_price_f64 = scaled_price_to_f64(option_detail.strike_price)?;
         require_gte!(
-            option_detail.strike_price,
+            strike_price_f64,
             oracle_price,
             OptionError::InvalidPriceRequirementError
         );
 
         // Calculate profit amount for put option: (strike_price - oracle_price) * quantity
         // Using safe decimal math to handle precision properly
-        let price_diff = math::checked_as_u64(option_detail.strike_price - oracle_price)?;
+        let price_diff = math::checked_as_u64(strike_price_f64 - oracle_price)?;
         let amount = math::checked_decimal_mul(
             price_diff,
             0, // oracle price exponent (assuming normalized)

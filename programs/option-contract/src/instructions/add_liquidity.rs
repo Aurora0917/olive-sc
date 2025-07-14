@@ -13,7 +13,6 @@ use {
         metadata::{
             create_metadata_accounts_v3,
             CreateMetadataAccountsV3,
-            MetadataAccount,
         }
     },
 };

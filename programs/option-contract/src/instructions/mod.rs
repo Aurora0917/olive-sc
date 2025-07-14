@@ -21,6 +21,7 @@ pub use close_perp_position::*;
 pub use add_collateral::*;
 pub use remove_collateral::*;
 pub use liquidate::*;
+pub use set_tp_sl::*;
 
 pub mod close_option;
 pub mod exercise_option;
@@ -45,3 +46,4 @@ pub mod close_perp_position;
 pub mod add_collateral;
 pub mod remove_collateral;
 pub mod liquidate;
+pub mod set_tp_sl;

@@ -30,7 +30,7 @@ pub fn close_limit_option(ctx: Context<CloseLimitOption>, params: &CloseLimitOpt
     let pay_custody = &mut ctx.accounts.pay_custody;
     let locked_custody_token_account = &ctx.accounts.locked_custody_token_account;
     let funding_account = &ctx.accounts.funding_account;
-    let pay_custody_oracle_account = &ctx.accounts.pay_custody_oracle_account;
+    let _pay_custody_oracle_account = &ctx.accounts.pay_custody_oracle_account;
     let custody_oracle_account = &ctx.accounts.custody_oracle_account;
     let locked_oracle = &ctx.accounts.locked_oracle;
 
@@ -45,7 +45,7 @@ pub fn close_limit_option(ctx: Context<CloseLimitOption>, params: &CloseLimitOpt
     // Only if option is valid and not exercised
     if option_detail.valid && option_detail.executed {
         // Get current time and check that option has not expired
-        let current_time: i64 = contract.get_time()? as i64;
+        let current_time: i64 = contract.get_time()?;
         if current_time >= option_detail.expired_date {
             return Err(OptionError::InvalidTimeError.into());
         }
@@ -64,7 +64,7 @@ pub fn close_limit_option(ctx: Context<CloseLimitOption>, params: &CloseLimitOpt
         );
 
         // Time decay logic for Black-Scholes
-        let remaining_seconds = option_detail.expired_date.saturating_sub(current_time as i64);
+        let remaining_seconds = option_detail.expired_date.saturating_sub(current_time);
         let remaining_days = remaining_seconds as f64 / 86400.0;
         let remaining_years = remaining_days / 365.0;
 
@@ -78,7 +78,7 @@ pub fn close_limit_option(ctx: Context<CloseLimitOption>, params: &CloseLimitOpt
         // Recalculate current option value using Black-Scholes for full position
         let bs_price_per_contract = OptionDetail::black_scholes(
             underlying_price,
-            option_detail.strike_price,
+            option_detail.strike_price as f64,
             remaining_years,
             option_detail.option_type == 0, // 0 = call, 1 = put
         );
@@ -174,7 +174,7 @@ pub fn close_limit_option(ctx: Context<CloseLimitOption>, params: &CloseLimitOpt
                 closed_option_detail.quantity = params.close_quantity;
                 closed_option_detail.amount = unlock_amount;
                 closed_option_detail.owner = option_detail.owner;
-                closed_option_detail.index = closed_option_detail.index;
+                closed_option_detail.index = option_detail.index;
                 closed_option_detail.period = option_detail.period;
                 closed_option_detail.expired_date = option_detail.expired_date;
                 closed_option_detail.purchase_date = option_detail.purchase_date;
@@ -197,7 +197,7 @@ pub fn close_limit_option(ctx: Context<CloseLimitOption>, params: &CloseLimitOpt
         }
     }
 
-    if option_detail.executed == false {
+    if !option_detail.executed {
         let unlock_amount = math::checked_div(
             math::checked_mul(option_detail.amount, params.close_quantity)?,
             option_detail.quantity

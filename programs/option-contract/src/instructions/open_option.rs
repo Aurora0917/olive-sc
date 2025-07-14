@@ -1,6 +1,6 @@
 use crate::{
-    errors::OptionError,
-    math,
+    errors::{OptionError, TradingError},
+    math::{self, f64_to_scaled_price},
     state::{Contract, Custody, OptionDetail, OraclePrice, Pool, User},
 };
 use anchor_lang::prelude::*;
@@ -36,6 +36,30 @@ pub fn open_option(ctx: Context<OpenOption>, params: &OpenOptionParams) -> Resul
     let option_index = user.option_index + 1;
     // compute position price
     let curtime = contract.get_time()?;
+
+    // Validate option parameters
+    require_gt!(
+        params.amount,
+        0,
+        TradingError::InvalidAmount
+    );
+    
+    require_gt!(
+        params.strike,
+        0.0,
+        TradingError::InvalidParameterError
+    );
+    
+    require!(
+        params.period > 0 && params.period <= 365, // Max 1 year
+        TradingError::InvalidParameterError
+    );
+    
+    require_gt!(
+        params.expired_time,
+        curtime as u64,
+        OptionError::OptionExpired
+    );
 
     // Check if the user's token balance is enough to pay premium
     require_gte!(
@@ -102,6 +126,14 @@ pub fn open_option(ctx: Context<OpenOption>, params: &OpenOptionParams) -> Resul
     option_detail.premium_asset = pay_custody.key();
 
     let quantity = math::checked_div(params.amount, pay_amount)?;
+    
+    // Validate minimum quantity to prevent zero-quantity options
+    require_gt!(
+        quantity,
+        0,
+        OptionError::ZeroQuantityError
+    );
+    
     msg!("quantity: {}", quantity);
 
     let decimals_multiplier = math::checked_powi(10.0, pay_custody.decimals as i32)?;
@@ -125,13 +157,13 @@ pub fn open_option(ctx: Context<OpenOption>, params: &OpenOptionParams) -> Resul
     option_detail.expired_date = params.expired_time as i64;
     option_detail.purchase_date = curtime as u64;
     option_detail.option_type = if custody.key() == locked_custody.key() { 0 } else { 1 };
-    option_detail.strike_price = params.strike;
+    option_detail.strike_price = f64_to_scaled_price(params.strike)?;
     option_detail.valid = true;
     option_detail.locked_asset = locked_custody.key();
     option_detail.pool = pool.key();
     option_detail.custody = custody.key();
     option_detail.limit_price = 0;
-    option_detail.entry_price = oracle_price;
+    option_detail.entry_price = f64_to_scaled_price(oracle_price)?;
     option_detail.bump = ctx.bumps.option_detail;  
     user.option_index = option_index;
 

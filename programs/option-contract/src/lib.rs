@@ -154,6 +154,11 @@ pub mod option_contract {
     pub fn liquidate(ctx: Context<Liquidate>, params: LiquidateParams) -> Result<()> {
         instructions::liquidate::liquidate(ctx, &params)
     }
+
+    // Set TP/SL for existing position
+    pub fn set_tp_sl(ctx: Context<SetTpSl>, params: SetTpSlParams) -> Result<()> {
+        instructions::set_tp_sl::set_tp_sl(ctx, &params)
+    }
 }
 
 pub fn get_pool_borrow_rates(

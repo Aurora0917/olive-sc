@@ -1,7 +1,7 @@
 // ==================== instructions/liquidate.rs ====================
 use crate::{
     errors::OptionError,
-    math,
+    math::{self, scaled_price_to_f64},
     state::{Contract, Custody, OraclePrice, Pool, PerpPosition, PerpSide},
 };
 use anchor_lang::prelude::*;
@@ -15,7 +15,7 @@ pub struct LiquidateParams {
 
 pub fn liquidate(
     ctx: Context<Liquidate>,
-    params: &LiquidateParams
+    _params: &LiquidateParams
 ) -> Result<()> {
     msg!("Liquidating perpetual position");
     
@@ -41,14 +41,15 @@ pub fn liquidate(
     msg!("Position liquidation price: {}", position.liquidation_price);
     
     // Check if position can be liquidated (simple price comparison)
+    let liquidation_price_f64 = scaled_price_to_f64(position.liquidation_price)?;
     let liquidatable = match position.side {
         PerpSide::Long => {
-            msg!("Long position: current_price {} <= liquidation_price {}", current_sol_price, position.liquidation_price);
-            current_sol_price <= position.liquidation_price
+            msg!("Long position: current_price {} <= liquidation_price {}", current_sol_price, liquidation_price_f64);
+            current_sol_price <= liquidation_price_f64
         },
         PerpSide::Short => {
-            msg!("Short position: current_price {} >= liquidation_price {}", current_sol_price, position.liquidation_price);
-            current_sol_price >= position.liquidation_price
+            msg!("Short position: current_price {} >= liquidation_price {}", current_sol_price, liquidation_price_f64);
+            current_sol_price >= liquidation_price_f64
         }
     };
     
@@ -63,13 +64,14 @@ pub fn liquidate(
     };
     
     // Calculate P&L for settlement
+    let entry_price_f64 = scaled_price_to_f64(position.entry_price)?;
     let price_diff = match position.side {
-        PerpSide::Long => current_sol_price - position.entry_price,
-        PerpSide::Short => position.entry_price - current_sol_price,
+        PerpSide::Long => current_sol_price - entry_price_f64,
+        PerpSide::Short => entry_price_f64 - current_sol_price,
     };
     
     let position_value_usd = position.position_size as f64 / math::checked_powi(10.0, sol_custody.decimals as i32)?;
-    let pnl_ratio = math::checked_float_div(price_diff, position.entry_price)?;
+    let pnl_ratio = math::checked_float_div(price_diff, entry_price_f64)?;
     let unrealized_pnl_usd = math::checked_float_mul(pnl_ratio, position_value_usd)?;
     let total_pnl = (unrealized_pnl_usd * 1_000_000.0) as i64; // Convert to micro-USD
     

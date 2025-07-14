@@ -1,6 +1,6 @@
 use crate::{
-    errors::OptionError,
-    math,
+    errors::{OptionError, TradingError, PerpetualsError},
+    math::{self, f64_to_scaled_ratio, f64_to_scaled_price},
     state::{Contract, Custody, OraclePrice, Pool, PerpPosition, PerpSide},
 };
 use anchor_lang::prelude::*;
@@ -26,9 +26,9 @@ pub fn add_collateral(
     let usdc_custody = &mut ctx.accounts.usdc_custody;
     
     // Validation
-    require_keys_eq!(position.owner, ctx.accounts.owner.key(), OptionError::Unauthorized);
-    require!(!position.is_liquidated, OptionError::PositionLiquidated);
-    require!(params.collateral_amount > 0, OptionError::InvalidAmount);
+    require_keys_eq!(position.owner, ctx.accounts.owner.key(), TradingError::Unauthorized);
+    require!(!position.is_liquidated, PerpetualsError::PositionLiquidated);
+    require!(params.collateral_amount > 0, TradingError::InvalidAmount);
     
     // Get current prices from oracles
     let current_time = contract.get_time()?;
@@ -50,14 +50,14 @@ pub fn add_collateral(
     };
     
     // Determine payment asset info
-    let (pay_decimals, pay_price, funding_account) = if params.pay_sol {
+    let (_pay_decimals, _pay_price, funding_account) = if params.pay_sol {
         (sol_custody.decimals, current_sol_price, &ctx.accounts.sol_funding_account)
     } else {
         (usdc_custody.decimals, usdc_price_value, &ctx.accounts.usdc_funding_account)
     };
     
     // Calculate payment amount needed
-    let payment_amount = if params.pay_sol == true {
+    let payment_amount = if params.pay_sol {
         math::checked_as_u64(params.collateral_amount as f64 * current_sol_price)?
     } else {
         math::checked_as_u64(params.collateral_amount as f64 * usdc_price_value * 1_000.0)?
@@ -79,7 +79,7 @@ pub fn add_collateral(
     position.update_position(current_sol_price, current_time, collateral_price)?;
     
     msg!("Current P&L before adding collateral: ${}", position.unrealized_pnl as f64 / 1_000_000.0);
-    msg!("Current margin ratio: {}%", position.margin_ratio * 100.0);
+    msg!("Current margin ratio: {}%", position.margin_ratio as f64 / 10_000.0);
     
     // Determine source and destination for transfer
     let (from_account, to_account) = if params.pay_sol {
@@ -91,14 +91,12 @@ pub fn add_collateral(
             // In practice, you might want to use a DEX or oracle-based conversion
             (&ctx.accounts.sol_funding_account, &ctx.accounts.sol_custody_token_account)
         }
+    } else if position_collateral_is_sol {
+        // USDC to SOL: need to handle conversion
+        (&ctx.accounts.usdc_funding_account, &ctx.accounts.usdc_custody_token_account)
     } else {
-        if position_collateral_is_sol {
-            // USDC to SOL: need to handle conversion
-            (&ctx.accounts.usdc_funding_account, &ctx.accounts.usdc_custody_token_account)
-        } else {
-            // USDC to USDC: direct transfer
-            (&ctx.accounts.usdc_funding_account, &ctx.accounts.usdc_custody_token_account)
-        }
+        // USDC to USDC: direct transfer
+        (&ctx.accounts.usdc_funding_account, &ctx.accounts.usdc_custody_token_account)
     };
     
     // Transfer payment from user to custody
@@ -156,30 +154,31 @@ pub fn add_collateral(
     
     // Recalculate leverage and margin ratio with new collateral
     let position_value_sol = position.position_size as f64 / math::checked_powi(10.0, sol_custody.decimals as i32)?;
-    let position_value_usd = math::checked_float_mul(position_value_sol, position.entry_price)?;
+    let position_value_usd = math::checked_float_mul(position_value_sol, position.entry_price as f64 / 1_000_000.0)?;
     
     let collateral_value_tokens = position.collateral_amount as f64 / math::checked_powi(10.0, collateral_decimals as i32)?;
     let collateral_value_usd = math::checked_float_mul(collateral_value_tokens, collateral_price)?;
     
     // Update leverage (should decrease with more collateral)
-    position.leverage = math::checked_float_div(position_value_usd, collateral_value_usd)?;
+    position.leverage = f64_to_scaled_ratio(math::checked_float_div(position_value_usd, collateral_value_usd)?)?;
     
     // Update margin ratio (should improve with more collateral)
     let current_equity_usd = collateral_value_usd + (position.unrealized_pnl as f64 / 1_000_000.0);
-    position.margin_ratio = math::checked_float_div(current_equity_usd, position_value_usd)?;
+    position.margin_ratio = f64_to_scaled_ratio(math::checked_float_div(current_equity_usd, position_value_usd)?)?;
     
     // ============ LIQUIDATION PRICE UPDATE (ONLY NEW ADDITION) ============
-    let maintenance_margin = PerpPosition::MAINTENANCE_MARGIN; // Usually 5% (0.05)
+    let _maintenance_margin = PerpPosition::MAINTENANCE_MARGIN; // Usually 5% (0.05)
     let liquidation_buffer = 0.005; // 0.5% buffer for safety
     
     // Calculate the new liquidation price with updated collateral
     let is_long = position.side == PerpSide::Long;
-    let entry_price = position.entry_price;
+    let entry_price = position.entry_price as f64 / 1_000_000.0;
+    let maintenance_margin_ratio = PerpPosition::MAINTENANCE_MARGIN as f64 / 1_000_000.0;
     
     let new_liquidation_price = if is_long {
         // For LONG positions: liquidation when price drops
         // At liquidation: collateral_value_usd + (liq_price - entry_price) * position_size_sol = maintenance_margin * position_value_usd
-        let required_equity = position_value_usd * maintenance_margin;
+        let required_equity = position_value_usd * maintenance_margin_ratio;
         let equity_deficit = required_equity - collateral_value_usd;
         let price_change_needed = equity_deficit / position_value_sol;
         
@@ -188,7 +187,7 @@ pub fn add_collateral(
     } else {
         // For SHORT positions: liquidation when price rises
         // At liquidation: collateral_value_usd + (entry_price - liq_price) * position_size_sol = maintenance_margin * position_value_usd
-        let required_equity = position_value_usd * maintenance_margin;
+        let required_equity = position_value_usd * maintenance_margin_ratio;
         let equity_deficit = required_equity - collateral_value_usd;
         let price_change_needed = equity_deficit / position_value_sol;
         
@@ -196,21 +195,21 @@ pub fn add_collateral(
     };
     
     // Update the liquidation price
-    position.liquidation_price = new_liquidation_price;
+    position.liquidation_price = f64_to_scaled_price(new_liquidation_price)?;
     // ============ END OF LIQUIDATION PRICE UPDATE ============
     
     position.last_update_time = current_time;
     
     // Validate new leverage is within limits
     require!(
-        position.leverage <= PerpPosition::MAX_LEVERAGE && position.leverage >= 1.0,
+        position.leverage <= PerpPosition::MAX_LEVERAGE && position.leverage >= f64_to_scaled_ratio(1.0)?,
         OptionError::InvalidLeverage
     );
     
     msg!("Collateral added successfully");
     msg!("New collateral amount: {}", position.collateral_amount);
     msg!("New leverage: {}x", position.leverage);
-    msg!("New margin ratio: {}%", position.margin_ratio * 100.0);
+    msg!("New margin ratio: {}%", position.margin_ratio as f64 / 10_000.0);
     msg!("New liquidation price: ${}", position.liquidation_price);
     msg!("Payment asset used: {}", if params.pay_sol { "SOL" } else { "USDC" });
     msg!("Payment amount: {}", payment_amount);

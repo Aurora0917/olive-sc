@@ -1,6 +1,6 @@
 use crate::{
     errors::OptionError,
-    math,
+    math::{self, f64_to_scaled_ratio},
     state::{Contract, Custody, OraclePrice, Pool, PerpPosition, PerpSide},
 };
 use anchor_lang::prelude::*;
@@ -191,7 +191,7 @@ pub fn close_perp_position(
         let remaining_collateral_value_usd = position.collateral_amount as f64 / math::checked_powi(10.0, if position.side == PerpSide::Long { sol_custody.decimals } else { usdc_custody.decimals } as i32)?;
         
         // Leverage stays the same in proportional close
-        position.leverage = math::checked_float_div(remaining_position_value_usd, remaining_collateral_value_usd)?;
+        position.leverage = f64_to_scaled_ratio(math::checked_float_div(remaining_position_value_usd, remaining_collateral_value_usd)?)?;
         
         // Update margin ratio
         position.last_update_time = current_time;
@@ -200,7 +200,7 @@ pub fn close_perp_position(
         msg!("Remaining position size: {}", position.position_size);
         msg!("Remaining collateral: {}", position.collateral_amount);
         msg!("Leverage: {}x", position.leverage);
-        msg!("Margin ratio: {}%", position.margin_ratio * 100.0);
+        msg!("Margin ratio: {}%", position.margin_ratio as f64 / 10_000.0);
     }
     
     msg!("Original collateral: {}", if position.side == PerpSide::Long { "SOL" } else { "USDC" });

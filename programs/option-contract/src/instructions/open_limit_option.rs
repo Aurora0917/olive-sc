@@ -1,11 +1,10 @@
 use crate::{
     errors::OptionError,
-    math,
+    math::{self, f64_to_scaled_price},
     state::{Contract, Custody, OptionDetail, OraclePrice, Pool, User},
 };
 use anchor_lang::prelude::*;
-use anchor_spl::
-    token::{self, Mint, Token, TokenAccount, Transfer as SplTransfer};
+use anchor_spl::token::{Mint, Token, TokenAccount};
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct OpenLimitOptionParams {
@@ -19,7 +18,7 @@ pub struct OpenLimitOptionParams {
 
 pub fn open_limit_option(ctx: Context<OpenLimitOption>, params: &OpenLimitOptionParams) -> Result<()> {
     let owner = &ctx.accounts.owner;
-    let token_program = &ctx.accounts.token_program;
+    let _token_program = &ctx.accounts.token_program;
     let option_detail = &mut ctx.accounts.option_detail;
     let contract = &ctx.accounts.contract;
     let user = &mut ctx.accounts.user;
@@ -30,7 +29,7 @@ pub fn open_limit_option(ctx: Context<OpenLimitOption>, params: &OpenLimitOption
 
     let pay_custody = &mut ctx.accounts.pay_custody;
     let pay_custody_oracle_account = &ctx.accounts.pay_custody_oracle_account;
-    let pay_custody_token_account = &ctx.accounts.pay_custody_token_account;
+    let _pay_custody_token_account = &ctx.accounts.pay_custody_token_account;
 
     let funding_account = &ctx.accounts.funding_account;
 
@@ -118,12 +117,12 @@ pub fn open_limit_option(ctx: Context<OpenLimitOption>, params: &OpenLimitOption
     option_detail.expired_date = params.expired_time as i64;
     option_detail.purchase_date = curtime as u64;
     option_detail.option_type = if custody.key() == locked_custody.key() { 0 } else { 1 };
-    option_detail.strike_price = params.strike;
+    option_detail.strike_price = f64_to_scaled_price(params.strike)?;
     option_detail.valid = true;
     option_detail.locked_asset = locked_custody.key();
     option_detail.pool = pool.key();
     option_detail.custody = custody.key();
-    option_detail.limit_price = (params.limit_price * 100.0) as u64;
+    option_detail.limit_price = f64_to_scaled_price(params.limit_price)?;
     option_detail.executed = false;
     user.option_index = option_index;
 

@@ -1,6 +1,6 @@
 use crate::{
     errors::OptionError,
-    math,
+    math::{self, f64_to_scaled_price, scaled_price_to_f64},
     state::{Contract, Custody, OptionDetail, OraclePrice, Pool, User},
 };
 use anchor_lang::prelude::*;
@@ -26,7 +26,7 @@ pub fn edit_option(ctx: Context<EditOption>, params: &EditOptionParams) -> Resul
     let option_detail = &mut ctx.accounts.option_detail;
     let contract = &ctx.accounts.contract;
     let user = &ctx.accounts.user;
-    let pool = &ctx.accounts.pool;
+    let _pool = &ctx.accounts.pool;
     let custody = &ctx.accounts.custody;
     let transfer_authority = &ctx.accounts.transfer_authority;
 
@@ -46,7 +46,7 @@ pub fn edit_option(ctx: Context<EditOption>, params: &EditOptionParams) -> Resul
     require_gte!(user.option_index, params.option_index);
 
     // Get current time and validate option hasn't expired
-    let current_time = contract.get_time()? as i64;
+    let current_time = contract.get_time()?;
     require!(current_time < option_detail.expired_date, OptionError::InvalidTimeError);
 
     // Validate at least one parameter is being changed
@@ -82,9 +82,10 @@ pub fn edit_option(ctx: Context<EditOption>, params: &EditOptionParams) -> Resul
     let current_size = option_detail.quantity as f64;
 
     // Calculate CURRENT total option value (old terms)
+    let current_strike_f64 = scaled_price_to_f64(option_detail.strike_price)?;
     let current_option_value_per_unit = OptionDetail::black_scholes_with_borrow_rate(
         underlying_price,
-        option_detail.strike_price, // OLD strike
+        current_strike_f64, // OLD strike converted to f64
         current_time_to_expiry,
         option_detail.option_type == 0,
         token_locked,
@@ -98,7 +99,7 @@ pub fn edit_option(ctx: Context<EditOption>, params: &EditOptionParams) -> Resul
     msg!("Current total option value: {}", current_total_option_value);
 
     // Determine new parameters
-    let new_strike = params.new_strike.unwrap_or(option_detail.strike_price);
+    let new_strike = params.new_strike.unwrap_or(current_strike_f64);
     let new_expiry = params.new_expiry.unwrap_or(option_detail.expired_date);
     let new_size = params.new_size.unwrap_or(current_size);
 
@@ -226,7 +227,7 @@ pub fn edit_option(ctx: Context<EditOption>, params: &EditOptionParams) -> Resul
     // If value_difference == 0.0, no payment needed
 
     // Update option parameters
-    option_detail.strike_price = new_strike;
+    option_detail.strike_price = f64_to_scaled_price(new_strike)?;
     option_detail.expired_date = new_expiry;
 
     option_detail.quantity = new_size as u64;
@@ -235,7 +236,7 @@ pub fn edit_option(ctx: Context<EditOption>, params: &EditOptionParams) -> Resul
 
     // Recalculate period in days (for consistency)
     let new_period_days = math::checked_div(
-        (new_expiry - option_detail.purchase_date as i64),
+        new_expiry - option_detail.purchase_date as i64,
         86400 // seconds per day
     )? as u64;
     option_detail.period = new_period_days;

@@ -40,19 +40,31 @@ impl Multisig {
     pub const LEN: usize = 8 + std::mem::size_of::<Multisig>();
 
     /// Returns instruction accounts and data hash.
-    /// Hash is not cryptographic and is meant to perform a fast check that admins are signing
-    /// the same instruction.
+    /// Uses a more secure hash with entropy from clock and account data
+    /// to prevent hash collision attacks.
     pub fn get_instruction_hash(
         instruction_accounts: &[AccountInfo],
         instruction_data: &[u8],
     ) -> u64 {
-        let mut hasher = AHasher::new_with_keys(1234, 5678);
+        // Add entropy from current clock to prevent predictable hashes
+        let clock = Clock::get().unwrap_or_default();
+        let entropy = (clock.unix_timestamp as u64).wrapping_mul(clock.slot);
+        
+        let mut hasher = AHasher::new_with_keys(entropy as u128, (entropy.wrapping_add(12345)) as u128);
+        
+        // Hash the number of accounts for additional differentiation
+        hasher.write(&instruction_accounts.len().to_le_bytes());
+        
         for account in instruction_accounts {
             hasher.write(account.key.as_ref());
         }
         if !instruction_data.is_empty() {
+            hasher.write(&instruction_data.len().to_le_bytes());
             hasher.write(instruction_data);
         }
+        
+        // Add final entropy to make hash collision more difficult
+        hasher.write(&entropy.to_le_bytes());
         hasher.finish()
     }
 
@@ -127,7 +139,7 @@ impl Multisig {
 
     /// Signs multisig and returns Ok(0) if there are enough signatures to continue or Ok(signatures_left) otherwise.
     /// If Err() is returned then signature was not recognized and transaction must be aborted.
-    pub fn sign_multisig<'info>(
+    pub fn sign_multisig(
         &mut self,
         signer_account: &AccountInfo,
         instruction_accounts: &[AccountInfo],

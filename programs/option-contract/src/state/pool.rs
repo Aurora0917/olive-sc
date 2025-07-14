@@ -127,7 +127,7 @@ impl Pool {
     }
 
     // Calculate Pool AUM
-    pub fn get_assets_under_management_usd<'c, 'info>(
+    pub fn get_assets_under_management_usd<'info>(
         &self,
         accounts: &'info [AccountInfo<'info>],
         curtime: i64,

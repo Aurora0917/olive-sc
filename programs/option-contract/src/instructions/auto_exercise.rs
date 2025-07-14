@@ -1,12 +1,12 @@
 use crate::{
     errors::OptionError,
-    math,
+    math::{self, scaled_price_to_f64},
     state::{Contract, Custody, OptionDetail, OraclePrice, Pool, User},
 };
 use anchor_lang::prelude::*;
 use anchor_spl::{
     associated_token::AssociatedToken,
-    token::{Mint, Token, TokenAccount},
+    token::{Mint, Token},
 };
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
@@ -55,7 +55,7 @@ pub fn auto_exercise(
 
     // ✅ FIXED: Auto-exercise should only work AFTER expiry (opposite of manual exercise)
     require_gte!(
-        current_timestamp as i64,
+        current_timestamp,
         option_detail.expired_date,
         OptionError::InvalidTimeError
     );
@@ -72,9 +72,10 @@ pub fn auto_exercise(
 
     if custody.key() == locked_custody.key() {
         // call option - only exercise if profitable
-        if oracle_price > option_detail.strike_price {
+        let strike_price_f64 = scaled_price_to_f64(option_detail.strike_price)?;
+        if oracle_price > strike_price_f64 {
             // Calculate Sol Amount from Option Detail Value : call / covered sol
-            let amount = (oracle_price - option_detail.strike_price) * (option_detail.quantity as f64) / oracle_price;
+            let amount = (oracle_price - strike_price_f64) * (option_detail.quantity as f64) / oracle_price;
 
             option_detail.profit = amount as u64;
             option_detail.claimed = amount as u64;
@@ -85,9 +86,10 @@ pub fn auto_exercise(
         }
     } else {
         // put option - only exercise if profitable
-        if option_detail.strike_price > oracle_price {
+        let strike_price_f64 = scaled_price_to_f64(option_detail.strike_price)?;
+        if strike_price_f64 > oracle_price {
             // Calculate Profit amount with option detail values: put / cash-secured usdc
-            let amount = (option_detail.strike_price - oracle_price) * (option_detail.quantity as f64);
+            let amount = (strike_price_f64 - oracle_price) * (option_detail.quantity as f64);
 
             option_detail.profit = amount as u64;
             option_detail.claimed = amount as u64;
