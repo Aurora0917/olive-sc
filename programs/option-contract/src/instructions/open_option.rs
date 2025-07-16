@@ -1,6 +1,8 @@
 use crate::{
     errors::{OptionError, TradingError, PoolError},
+    events::OptionOpened,
     math::{self, f64_to_scaled_price},
+    utils::option_pricing::*,
     state::{Contract, Custody, OptionDetail, OraclePrice, Pool, User},
 };
 use anchor_lang::prelude::*;
@@ -96,7 +98,7 @@ pub fn open_option(ctx: Context<OpenOption>, params: &OpenOptionParams) -> Resul
     
     
     // Calculate Premium using enhanced Black-Scholes with dynamic borrow rate
-    let premium = OptionDetail::black_scholes_with_borrow_rate(
+    let premium = black_scholes_with_borrow_rate(
         oracle_price,
         params.strike,
         period_year,
@@ -150,13 +152,30 @@ pub fn open_option(ctx: Context<OpenOption>, params: &OpenOptionParams) -> Resul
         PoolError::InvalidPoolBalanceError
     );
 
-    msg!("index: {}", option_index);
-    msg!("period: {}", params.period);
-    msg!("amount: {}", params.amount);
-    msg!("limit price: {}", 0);
-    msg!("executed: {}", false);
-    msg!("expired date: {}", params.expired_time);
-    msg!("purchase date: {}", params.expired_time);
+    emit!(OptionOpened {
+        owner: option_detail.owner,
+        index: option_detail.index,
+        amount: option_detail.amount,
+        quantity: option_detail.quantity,
+        period: option_detail.period,
+        expired_date: option_detail.expired_date,
+        purchase_date: option_detail.purchase_date,
+        option_type: option_detail.option_type,
+        strike_price: option_detail.strike_price,
+        valid: option_detail.valid,
+        locked_asset: option_detail.locked_asset,
+        pool: option_detail.pool,
+        custody: option_detail.custody,
+        premium: option_detail.premium,
+        premium_asset: option_detail.premium_asset,
+        limit_price: option_detail.limit_price,
+        executed: option_detail.executed,
+        entry_price: option_detail.entry_price,
+        last_update_time: option_detail.last_update_time,
+        take_profit_price: option_detail.take_profit_price,
+        stop_loss_price: option_detail.stop_loss_price,
+        bump: option_detail.bump,
+    });
 
     // store option data
     option_detail.amount = params.amount;

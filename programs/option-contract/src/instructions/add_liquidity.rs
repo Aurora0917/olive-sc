@@ -2,7 +2,7 @@
 
 use {
     crate::{
-        errors::ContractError, math, state::{
+        errors::ContractError, events::LiquidityAdded, math, state::{
             custody::Custody, oracle::OraclePrice, Contract, Pool
         }
     },
@@ -218,6 +218,18 @@ pub fn add_liquidity<'info>(ctx: Context<'_, '_, 'info, 'info, AddLiquidity<'inf
     custody.exit(&crate::ID)?;
     pool.aum_usd =
         pool.get_assets_under_management_usd(ctx.remaining_accounts, curtime)?;
+
+    emit!(LiquidityAdded {
+        owner: ctx.accounts.owner.key(),
+        pool: pool.key(),
+        custody: custody.key(),
+        amount_in: params.amount_in,
+        deposit_amount,
+        lp_amount,
+        fee_amount,
+        token_amount_usd,
+        pool_aum_usd: pool.aum_usd,
+    });
 
     Ok(())
 }

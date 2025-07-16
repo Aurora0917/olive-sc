@@ -1,6 +1,7 @@
 use crate::{
     errors::{PerpetualError, TradingError},
     math::{self, f64_to_scaled_price},
+    utils::risk_management::*,
     state::{Contract, Custody, OraclePrice, Pool, Position, Side, PositionType},
 };
 use anchor_lang::prelude::*;
@@ -74,7 +75,6 @@ pub fn remove_collateral(
     
     // Calculate new margin requirements
     let new_initial_margin_bps = math::checked_div(10_000u64, new_leverage)?;
-    let new_maintenance_margin_bps = math::checked_div(new_initial_margin_bps, 2)?;
     
     // Ensure new margin requirements meet minimum standards
     require!(
@@ -85,7 +85,6 @@ pub fn remove_collateral(
     // Check if position would be liquidatable after removing collateral
     let new_liquidation_price = calculate_liquidation_price(
         position.price,
-        new_maintenance_margin_bps,
         position.side
     )?;
     
@@ -116,7 +115,7 @@ pub fn remove_collateral(
     )?)?;
     
     require!(
-        new_margin_ratio_bps > new_maintenance_margin_bps + 100, // 1% buffer
+        new_margin_ratio_bps > Position::LIQUIDATION_MARGIN_BPS + 20, // 1% buffer
         PerpetualError::InsufficientMargin
     );
     
@@ -167,8 +166,6 @@ pub fn remove_collateral(
     position.collateral_amount = new_collateral_amount;
     position.collateral_usd = new_collateral_usd;
     position.borrow_size_usd = position.size_usd.saturating_sub(position.collateral_usd);
-    position.initial_margin_bps = new_initial_margin_bps;
-    position.maintenance_margin_bps = new_maintenance_margin_bps;
     position.liquidation_price = new_liquidation_price;
     position.update_time = current_time;
     
@@ -181,26 +178,6 @@ pub fn remove_collateral(
     msg!("Withdrawal amount: {} tokens", withdrawal_tokens);
     
     Ok(())
-}
-
-fn calculate_liquidation_price(
-    entry_price: u64,
-    maintenance_margin_bps: u64,
-    side: Side
-) -> Result<u64> {
-    let entry_price_f64 = math::checked_float_div(entry_price as f64, crate::math::PRICE_SCALE as f64)?;
-    let margin_ratio = maintenance_margin_bps as f64 / 10_000.0;
-    
-    let liquidation_price_f64 = match side {
-        Side::Long => {
-            math::checked_float_mul(entry_price_f64, 1.0 - margin_ratio)?
-        },
-        Side::Short => {
-            math::checked_float_mul(entry_price_f64, 1.0 + margin_ratio)?
-        }
-    };
-    
-    f64_to_scaled_price(liquidation_price_f64)
 }
 
 #[derive(Accounts)]

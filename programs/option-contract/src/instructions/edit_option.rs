@@ -1,6 +1,7 @@
 use crate::{
     errors::{OptionError, PoolError, TradingError},
     math::{self, f64_to_scaled_price, scaled_price_to_f64},
+    utils::option_pricing::*,
     state::{Contract, Custody, OptionDetail, OraclePrice, Pool, User},
 };
 use anchor_lang::prelude::*;
@@ -83,7 +84,7 @@ pub fn edit_option(ctx: Context<EditOption>, params: &EditOptionParams) -> Resul
 
     // Calculate CURRENT total option value (old terms)
     let current_strike_f64 = scaled_price_to_f64(option_detail.strike_price)?;
-    let current_option_value_per_unit = OptionDetail::black_scholes_with_borrow_rate(
+    let current_option_value_per_unit = black_scholes_with_borrow_rate(
         underlying_price,
         current_strike_f64, // OLD strike converted to f64
         current_time_to_expiry,
@@ -115,7 +116,7 @@ pub fn edit_option(ctx: Context<EditOption>, params: &EditOptionParams) -> Resul
     )?;
 
     // Calculate NEW total option value (new terms)
-    let new_option_value_per_unit = OptionDetail::black_scholes_with_borrow_rate(
+    let new_option_value_per_unit = black_scholes_with_borrow_rate(
         underlying_price,
         new_strike, // NEW strike
         new_time_to_expiry,

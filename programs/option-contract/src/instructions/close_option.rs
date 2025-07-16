@@ -1,6 +1,8 @@
 use crate::{
     errors::{OptionError, PoolError, TradingError},
+    events::OptionClosed,
     math::{self, scaled_price_to_f64},
+    utils::option_pricing::*,
     state::{Contract, Custody, OptionDetail, OraclePrice, Pool, User},
 };
 use anchor_lang::prelude::*;
@@ -79,7 +81,7 @@ pub fn close_option(ctx: Context<CloseOption>, params: &CloseOptionParams) -> Re
         let (token_locked, token_owned) = (locked_custody.token_locked, locked_custody.token_owned);
         
         // Calculate Premium using enhanced Black-Scholes with dynamic borrow rate
-        let bs_price_per_contract = OptionDetail::black_scholes_with_borrow_rate(
+        let bs_price_per_contract = black_scholes_with_borrow_rate(
             underlying_price,
             scaled_price_to_f64(option_detail.strike_price)?,
             remaining_years,
@@ -202,6 +204,31 @@ pub fn close_option(ctx: Context<CloseOption>, params: &CloseOptionParams) -> Re
             option_detail.amount = math::checked_sub(option_detail.amount, unlock_amount)?;
         }
     }
+
+    emit!(OptionClosed {
+        owner: option_detail.owner,
+        index: option_detail.index,
+        amount: option_detail.amount,
+        quantity: option_detail.quantity,
+        period: option_detail.period,
+        expired_date: option_detail.expired_date,
+        purchase_date: option_detail.purchase_date,
+        option_type: option_detail.option_type,
+        strike_price: option_detail.strike_price,
+        valid: option_detail.valid,
+        locked_asset: option_detail.locked_asset,
+        pool: option_detail.pool,
+        custody: option_detail.custody,
+        premium: option_detail.premium,
+        premium_asset: option_detail.premium_asset,
+        limit_price: option_detail.limit_price,
+        executed: option_detail.executed,
+        entry_price: option_detail.entry_price,
+        last_update_time: option_detail.last_update_time,
+        take_profit_price: option_detail.take_profit_price,
+        stop_loss_price: option_detail.stop_loss_price,
+        close_quantity: params.close_quantity,
+    });
 
     Ok(())
 }

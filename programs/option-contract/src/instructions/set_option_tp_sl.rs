@@ -1,5 +1,6 @@
 use crate::{
     errors::{OptionError, TradingError},
+    events::OptionTpSlSet,
     math::f64_to_scaled_price,
     state::{Contract, OptionDetail, Pool, User},
 };
@@ -77,13 +78,29 @@ pub fn set_option_tp_sl(
     // Update last update time
     option_detail.last_update_time = current_time;
     
-    msg!("Successfully set TP/SL for option");
-    if let Some(tp) = option_detail.take_profit_price {
-        msg!("Take profit price: {}", tp);
-    }
-    if let Some(sl) = option_detail.stop_loss_price {
-        msg!("Stop loss price: {}", sl);
-    }
+    emit!(OptionTpSlSet {
+        owner: option_detail.owner,
+        index: option_detail.index,
+        amount: option_detail.amount,
+        quantity: option_detail.quantity,
+        period: option_detail.period,
+        expired_date: option_detail.expired_date,
+        purchase_date: option_detail.purchase_date,
+        option_type: option_detail.option_type,
+        strike_price: option_detail.strike_price,
+        valid: option_detail.valid,
+        locked_asset: option_detail.locked_asset,
+        pool: option_detail.pool,
+        custody: option_detail.custody,
+        premium: option_detail.premium,
+        premium_asset: option_detail.premium_asset,
+        limit_price: option_detail.limit_price,
+        executed: option_detail.executed,
+        entry_price: option_detail.entry_price,
+        last_update_time: option_detail.last_update_time,
+        take_profit_price: option_detail.take_profit_price,
+        stop_loss_price: option_detail.stop_loss_price,
+    });
     
     Ok(())
 }

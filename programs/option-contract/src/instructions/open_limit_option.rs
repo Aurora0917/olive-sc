@@ -1,6 +1,8 @@
 use crate::{
     errors::{OptionError, PoolError, TradingError},
+    events::LimitOptionOpened,
     math::{self, f64_to_scaled_price},
+    utils::option_pricing::*,
     state::{Contract, Custody, OptionDetail, OraclePrice, Pool, User},
 };
 use anchor_lang::prelude::*;
@@ -62,7 +64,7 @@ pub fn open_limit_option(ctx: Context<OpenLimitOption>, params: &OpenLimitOption
     msg!("params.strike: {}", params.strike);
     msg!("period_year: {}", period_year);
     // Calculate Premium in usd using black scholes formula.
-    let premium = OptionDetail::black_scholes(
+    let premium = black_scholes(
         oracle_price,
         params.strike,
         period_year,
@@ -125,6 +127,30 @@ pub fn open_limit_option(ctx: Context<OpenLimitOption>, params: &OpenLimitOption
     option_detail.take_profit_price = None;
     option_detail.stop_loss_price = None;
     user.option_index = option_index;
+
+    emit!(LimitOptionOpened {
+        owner: option_detail.owner,
+        index: option_detail.index,
+        amount: option_detail.amount,
+        quantity: option_detail.quantity,
+        period: option_detail.period,
+        expired_date: option_detail.expired_date,
+        purchase_date: option_detail.purchase_date,
+        option_type: option_detail.option_type,
+        strike_price: option_detail.strike_price,
+        valid: option_detail.valid,
+        locked_asset: option_detail.locked_asset,
+        pool: option_detail.pool,
+        custody: option_detail.custody,
+        premium: option_detail.premium,
+        premium_asset: option_detail.premium_asset,
+        limit_price: option_detail.limit_price,
+        executed: option_detail.executed,
+        entry_price: option_detail.entry_price,
+        last_update_time: option_detail.last_update_time,
+        take_profit_price: option_detail.take_profit_price,
+        stop_loss_price: option_detail.stop_loss_price,
+    });
 
     Ok(())
 }

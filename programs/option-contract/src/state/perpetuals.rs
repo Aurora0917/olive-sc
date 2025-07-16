@@ -51,8 +51,6 @@ pub struct Position {
     
     // Risk Management (Set at open, used for liquidation)
     pub liquidation_price: u64,              // Pre-calculated for efficiency
-    pub initial_margin_bps: u64,            // e.g., 400 = 4% for 250x leverage
-    pub maintenance_margin_bps: u64,        // e.g., 200 = 2% for liquidation
     
     // Funding & Interest Tracking
     pub cumulative_interest_snapshot: u128,  // Pool's cumulative at position open
@@ -82,9 +80,9 @@ impl Position {
     pub const LEN: usize = 8 + std::mem::size_of::<Position>();
     
     // 250x leverage = 0.4% initial margin
-    pub const MAX_LEVERAGE: u64 = 250;
-    pub const MIN_INITIAL_MARGIN_BPS: u64 = 40; // 0.4% for 250x leverage
-    pub const LIQUIDATION_MARGIN_BPS: u64 = 20; // 0.2% liquidation threshold
+    pub const MAX_LEVERAGE: u64 = 100;
+    pub const MIN_INITIAL_MARGIN_BPS: u64 = 100; // 1.0% for 100x leverage
+    pub const LIQUIDATION_MARGIN_BPS: u64 = 40; // 0.4% liquidation threshold
     
     pub fn get_initial_leverage(&self) -> Result<u64> {
         if self.collateral_usd == 0 {
@@ -187,7 +185,7 @@ impl Position {
             self.size_usd as u128,
         )?)?;
         
-        Ok(margin_ratio_bps <= self.maintenance_margin_bps)
+        Ok(margin_ratio_bps <= Self::LIQUIDATION_MARGIN_BPS)
     }
     
     pub fn calculate_pnl(&self, current_price: u64) -> Result<i64> {

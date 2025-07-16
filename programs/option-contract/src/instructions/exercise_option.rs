@@ -1,5 +1,6 @@
 use crate::{
     errors::{OptionError, TradingError},
+    events::OptionExercised,
     math::{self, scaled_price_to_f64},
     state::{Contract, Custody, OptionDetail, OraclePrice, Pool, User},
 };
@@ -161,6 +162,32 @@ pub fn exercise_option(ctx: Context<ExerciseOption>, params: &ExerciseOptionPara
     // Update locked custody balance
     locked_custody.token_locked =
         math::checked_sub(locked_custody.token_locked, option_detail.amount)?;
+
+    emit!(OptionExercised {
+        owner: option_detail.owner,
+        index: option_detail.index,
+        amount: option_detail.amount,
+        quantity: option_detail.quantity,
+        period: option_detail.period,
+        expired_date: option_detail.expired_date,
+        purchase_date: option_detail.purchase_date,
+        option_type: option_detail.option_type,
+        strike_price: option_detail.strike_price,
+        valid: option_detail.valid,
+        locked_asset: option_detail.locked_asset,
+        pool: option_detail.pool,
+        custody: option_detail.custody,
+        premium: option_detail.premium,
+        premium_asset: option_detail.premium_asset,
+        limit_price: option_detail.limit_price,
+        executed: option_detail.executed,
+        entry_price: option_detail.entry_price,
+        last_update_time: option_detail.last_update_time,
+        take_profit_price: option_detail.take_profit_price,
+        stop_loss_price: option_detail.stop_loss_price,
+        exercised: option_detail.exercised,
+        profit: option_detail.profit,
+    });
 
     Ok(())
 }

@@ -1,5 +1,6 @@
 use crate::{
     errors::{PerpetualError, TradingError},
+    events::PerpTpSlSet,
     state::{Pool, Position, Side, PositionType},
 };
 use anchor_lang::prelude::*;
@@ -69,12 +70,33 @@ pub fn set_tp_sl(
     // Update TP/SL
     position.update_tp_sl(params.take_profit_price, params.stop_loss_price)?;
     
-    msg!("Successfully set TP/SL");
-    msg!("Take Profit Price: {:?}", position.take_profit_price);
-    msg!("Stop Loss Price: {:?}", position.stop_loss_price);
-    msg!("Entry Price: {}", position.price);
-    msg!("Liquidation Price: {}", position.liquidation_price);
-    msg!("Position Side: {:?}", position.side);
+    emit!(PerpTpSlSet {
+        owner: position.owner,
+        pool: position.pool,
+        custody: position.custody,
+        collateral_custody: position.collateral_custody,
+        position_type: position.position_type as u8,
+        side: position.side as u8,
+        is_liquidated: position.is_liquidated,
+        price: position.price,
+        size_usd: position.size_usd,
+        borrow_size_usd: position.borrow_size_usd,
+        collateral_usd: position.collateral_usd,
+        open_time: position.open_time,
+        update_time: position.update_time,
+        liquidation_price: position.liquidation_price,
+        cumulative_interest_snapshot: position.cumulative_interest_snapshot,
+        cumulative_funding_snapshot: position.cumulative_funding_snapshot,
+        opening_fee_paid: position.opening_fee_paid,
+        total_fees_paid: position.total_fees_paid,
+        locked_amount: position.locked_amount,
+        collateral_amount: position.collateral_amount,
+        take_profit_price: position.take_profit_price,
+        stop_loss_price: position.stop_loss_price,
+        trigger_price: position.trigger_price,
+        trigger_above_threshold: position.trigger_above_threshold,
+        bump: position.bump,
+    });
     
     Ok(())
 }

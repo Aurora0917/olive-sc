@@ -4,12 +4,11 @@ use anchor_lang::prelude::*;
 use instructions::*;
 
 pub mod errors;
+pub mod events;
 pub mod instructions;
 pub mod math;
 pub mod state;
 pub mod utils;
-
-use state::OptionDetail;
 
 declare_id!("FJHiFT7Deh8mKNzQDjBveWpirgTCdNDfnLTnWec1LxdT");
 
@@ -174,34 +173,4 @@ pub mod option_contract {
     pub fn execute_limit_order(ctx: Context<ExecuteLimitOrder>, params: ExecuteLimitOrderParams) -> Result<()> {
         instructions::execute_limit_order::execute_limit_order(ctx, &params)
     }
-}
-
-pub fn get_pool_borrow_rates(
-    sol_locked: u64,
-    sol_owned: u64,
-    usdc_locked: u64,
-    usdc_owned: u64,
-) -> Result<(f64, f64)> {
-    let sol_rate = OptionDetail::get_sol_borrow_rate(sol_locked, sol_owned)?;
-    let usdc_rate = OptionDetail::get_usdc_borrow_rate(usdc_locked, usdc_owned)?;
-    Ok((sol_rate, usdc_rate))
-}
-
-/// Log pool utilization and rates (for debugging)
-pub fn log_pool_status(
-    sol_locked: u64,
-    sol_owned: u64,
-    usdc_locked: u64,
-    usdc_owned: u64,
-) -> Result<()> {
-    let sol_util = OptionDetail::calculate_utilization(sol_locked, sol_owned);
-    let usdc_util = OptionDetail::calculate_utilization(usdc_locked, usdc_owned);
-    let (sol_rate, usdc_rate) = get_pool_borrow_rates(sol_locked, sol_owned, usdc_locked, usdc_owned)?;
-
-    msg!(
-        "Pool Status - SOL: {:.0}% util, {:.2}% rate | USDC: {:.0}% util, {:.2}% rate",
-        sol_util, sol_rate, usdc_util, usdc_rate
-    );
-
-    Ok(())
 }

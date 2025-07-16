@@ -1,5 +1,6 @@
 use crate::{
     errors::PerpetualError,
+    events::PositionLiquidated,
     math::{self, f64_to_scaled_price},
     state::{Contract, Custody, OraclePrice, Pool, Position, Side, PositionType},
 };
@@ -187,10 +188,36 @@ pub fn liquidate(
     position.total_fees_paid = math::checked_add(position.total_fees_paid, interest_payment.try_into().unwrap())?;
     position.total_fees_paid = math::checked_add(position.total_fees_paid, liquidator_reward_usd)?;
     
-    msg!("Successfully liquidated position");
-    msg!("Settlement to owner: {} tokens", settlement_tokens);
-    msg!("Liquidator reward: {} tokens", liquidator_reward_tokens);
-    msg!("Total fees paid: {}", position.total_fees_paid);
+    emit!(PositionLiquidated {
+        owner: position.owner,
+        pool: position.pool,
+        custody: position.custody,
+        collateral_custody: position.collateral_custody,
+        position_type: position.position_type as u8,
+        side: position.side as u8,
+        is_liquidated: position.is_liquidated,
+        price: position.price,
+        size_usd: position.size_usd,
+        borrow_size_usd: position.borrow_size_usd,
+        collateral_usd: position.collateral_usd,
+        open_time: position.open_time,
+        update_time: position.update_time,
+        liquidation_price: position.liquidation_price,
+        cumulative_interest_snapshot: position.cumulative_interest_snapshot,
+        cumulative_funding_snapshot: position.cumulative_funding_snapshot,
+        opening_fee_paid: position.opening_fee_paid,
+        total_fees_paid: position.total_fees_paid,
+        locked_amount: position.locked_amount,
+        collateral_amount: position.collateral_amount,
+        take_profit_price: position.take_profit_price,
+        stop_loss_price: position.stop_loss_price,
+        trigger_price: position.trigger_price,
+        trigger_above_threshold: position.trigger_above_threshold,
+        bump: position.bump,
+        settlement_tokens,
+        liquidator_reward_tokens,
+        liquidator: ctx.accounts.liquidator.key(),
+    });
     
     Ok(())
 }

@@ -1,7 +1,8 @@
 use crate::{
     errors::{PerpetualError, TradingError},
-    math::{self, f64_to_scaled_price},
-    state::{Contract, Custody, OraclePrice, Pool, Position, Side, PositionType},
+    math::{self},
+    utils::risk_management::*,
+    state::{Contract, Custody, OraclePrice, Pool, Position, PositionType},
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer as SplTransfer};
@@ -116,17 +117,10 @@ pub fn add_collateral(
     
     // Recalculate margin requirements based on new collateral
     let new_leverage = math::checked_div(position.size_usd, position.collateral_usd)?;
-    let new_initial_margin_bps = math::checked_div(10_000u64, new_leverage)?;
-    let new_maintenance_margin_bps = math::checked_div(new_initial_margin_bps, 2)?;
-    
-    // Update margin requirements
-    position.initial_margin_bps = new_initial_margin_bps;
-    position.maintenance_margin_bps = new_maintenance_margin_bps;
     
     // Recalculate liquidation price with new margin
     let new_liquidation_price = calculate_liquidation_price(
         position.price,
-        new_maintenance_margin_bps,
         position.side
     )?;
     
@@ -141,26 +135,6 @@ pub fn add_collateral(
     msg!("New borrow size USD: {}", position.borrow_size_usd);
     
     Ok(())
-}
-
-fn calculate_liquidation_price(
-    entry_price: u64,
-    maintenance_margin_bps: u64,
-    side: Side
-) -> Result<u64> {
-    let entry_price_f64 = math::checked_float_div(entry_price as f64, crate::math::PRICE_SCALE as f64)?;
-    let margin_ratio = maintenance_margin_bps as f64 / 10_000.0;
-    
-    let liquidation_price_f64 = match side {
-        Side::Long => {
-            math::checked_float_mul(entry_price_f64, 1.0 - margin_ratio)?
-        },
-        Side::Short => {
-            math::checked_float_mul(entry_price_f64, 1.0 + margin_ratio)?
-        }
-    };
-    
-    f64_to_scaled_price(liquidation_price_f64)
 }
 
 #[derive(Accounts)]

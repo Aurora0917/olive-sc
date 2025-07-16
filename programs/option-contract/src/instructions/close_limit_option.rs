@@ -1,6 +1,8 @@
 use crate::{
     errors::{OptionError, PoolError, TradingError},
+    events::LimitOptionClosed,
     math,
+    utils::option_pricing::*,
     state::{Contract, Custody, OptionDetail, OraclePrice, Pool, User},
 };
 use anchor_lang::prelude::*;
@@ -76,7 +78,7 @@ pub fn close_limit_option(ctx: Context<CloseLimitOption>, params: &CloseLimitOpt
         )?.get_price();
 
         // Recalculate current option value using Black-Scholes for full position
-        let bs_price_per_contract = OptionDetail::black_scholes(
+        let bs_price_per_contract = black_scholes(
             underlying_price,
             option_detail.strike_price as f64,
             remaining_years,
@@ -205,6 +207,31 @@ pub fn close_limit_option(ctx: Context<CloseLimitOption>, params: &CloseLimitOpt
         option_detail.quantity = math::checked_sub(option_detail.quantity, params.close_quantity)?;
         option_detail.amount = math::checked_sub(option_detail.amount, unlock_amount)?;
     }
+
+    emit!(LimitOptionClosed {
+        owner: option_detail.owner,
+        index: option_detail.index,
+        amount: option_detail.amount,
+        quantity: option_detail.quantity,
+        period: option_detail.period,
+        expired_date: option_detail.expired_date,
+        purchase_date: option_detail.purchase_date,
+        option_type: option_detail.option_type,
+        strike_price: option_detail.strike_price,
+        valid: option_detail.valid,
+        locked_asset: option_detail.locked_asset,
+        pool: option_detail.pool,
+        custody: option_detail.custody,
+        premium: option_detail.premium,
+        premium_asset: option_detail.premium_asset,
+        limit_price: option_detail.limit_price,
+        executed: option_detail.executed,
+        entry_price: option_detail.entry_price,
+        last_update_time: option_detail.last_update_time,
+        take_profit_price: option_detail.take_profit_price,
+        stop_loss_price: option_detail.stop_loss_price,
+        close_quantity: params.close_quantity,
+    });
 
     Ok(())
 }

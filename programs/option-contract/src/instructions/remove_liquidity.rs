@@ -1,6 +1,6 @@
 use {
     crate::{
-        errors::{ContractError, PerpetualError, PoolError}, math, state::{
+        errors::{ContractError, PerpetualError, PoolError}, events::LiquidityRemoved, math, state::{
             custody::Custody,
             oracle::OraclePrice, Contract, Pool,
         }
@@ -195,6 +195,17 @@ pub fn remove_liquidity<'info>(
     custody.exit(&crate::ID)?;
     pool.aum_usd =
         pool.get_assets_under_management_usd(ctx.remaining_accounts, curtime)?;
+
+    emit!(LiquidityRemoved {
+        owner: ctx.accounts.owner.key(),
+        pool: pool.key(),
+        custody: custody.key(),
+        lp_amount_in: params.lp_amount_in,
+        transfer_amount,
+        fee_amount,
+        withdrawal_amount,
+        pool_aum_usd: pool.aum_usd,
+    });
 
     Ok(())
 }

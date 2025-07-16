@@ -1,6 +1,8 @@
 use crate::{
     errors::{PerpetualError, TradingError},
+    events::LimitOrderExecuted,
     math::{self, f64_to_scaled_price},
+    utils::risk_management::*,
     state::{Contract, Custody, OraclePrice, Pool, Position, PositionType, Side, User},
 };
 use anchor_lang::prelude::*;
@@ -64,7 +66,6 @@ pub fn execute_limit_order(
     // Calculate liquidation price for the new market position
     let liquidation_price = calculate_liquidation_price(
         execution_price_scaled,
-        position.maintenance_margin_bps,
         position.side
     )?;
     
@@ -101,34 +102,36 @@ pub fn execute_limit_order(
         )?;
     }
     
-    msg!("Successfully executed limit order");
-    msg!("Position converted to market position");
-    msg!("Execution price: {}", execution_price_scaled);
-    msg!("Liquidation price: {}", position.liquidation_price);
-    msg!("Funding snapshot: {}", position.cumulative_funding_snapshot);
-    msg!("Interest snapshot: {}", position.cumulative_interest_snapshot);
+    emit!(LimitOrderExecuted {
+        owner: position.owner,
+        pool: position.pool,
+        custody: position.custody,
+        collateral_custody: position.collateral_custody,
+        position_type: position.position_type as u8,
+        side: position.side as u8,
+        is_liquidated: position.is_liquidated,
+        price: position.price,
+        size_usd: position.size_usd,
+        borrow_size_usd: position.borrow_size_usd,
+        collateral_usd: position.collateral_usd,
+        open_time: position.open_time,
+        update_time: position.update_time,
+        liquidation_price: position.liquidation_price,
+        cumulative_interest_snapshot: position.cumulative_interest_snapshot,
+        cumulative_funding_snapshot: position.cumulative_funding_snapshot,
+        opening_fee_paid: position.opening_fee_paid,
+        total_fees_paid: position.total_fees_paid,
+        locked_amount: position.locked_amount,
+        collateral_amount: position.collateral_amount,
+        take_profit_price: position.take_profit_price,
+        stop_loss_price: position.stop_loss_price,
+        trigger_price: position.trigger_price,
+        trigger_above_threshold: position.trigger_above_threshold,
+        bump: position.bump,
+        execution_price: execution_price_scaled,
+    });
     
     Ok(())
-}
-
-fn calculate_liquidation_price(
-    entry_price: u64,
-    maintenance_margin_bps: u64,
-    side: Side
-) -> Result<u64> {
-    let entry_price_f64 = math::checked_float_div(entry_price as f64, crate::math::PRICE_SCALE as f64)?;
-    let margin_ratio = maintenance_margin_bps as f64 / 10_000.0;
-    
-    let liquidation_price_f64 = match side {
-        Side::Long => {
-            math::checked_float_mul(entry_price_f64, 1.0 - margin_ratio)?
-        },
-        Side::Short => {
-            math::checked_float_mul(entry_price_f64, 1.0 + margin_ratio)?
-        }
-    };
-    
-    f64_to_scaled_price(liquidation_price_f64)
 }
 
 #[derive(Accounts)]

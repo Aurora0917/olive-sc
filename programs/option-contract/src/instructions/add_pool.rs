@@ -1,7 +1,10 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token};
 
-use crate::state::{Contract, multisig::{Multisig, AdminInstruction}, Pool};
+use crate::{
+    events::PoolAdded,
+    state::{Contract, multisig::{Multisig, AdminInstruction}, Pool}
+};
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct AddPoolParams {
@@ -56,7 +59,22 @@ pub fn add_pool<'info>(ctx: Context<'_, '_, '_, 'info, AddPool<'info>>, params: 
     pool.total_borrowed_usd = 0;
     pool.last_utilization_update = Clock::get()?.unix_timestamp;
     
-    contract.pools.push(ctx.accounts.pool.key());
+    contract.pools.push(pool.key());
+    
+    emit!(PoolAdded {
+        pool: pool.key(),
+        name: pool.name.clone(),
+        lp_token_mint: ctx.accounts.lp_token_mint.key(),
+        bump: pool.bump,
+        lp_token_bump: pool.lp_token_bump,
+        cumulative_funding_rate_long: pool.cumulative_funding_rate_long,
+        cumulative_funding_rate_short: pool.cumulative_funding_rate_short,
+        cumulative_interest_rate: pool.cumulative_interest_rate,
+        long_open_interest_usd: pool.long_open_interest_usd,
+        short_open_interest_usd: pool.short_open_interest_usd,
+        total_borrowed_usd: pool.total_borrowed_usd,
+    });
+
     Ok(0)
 }
 

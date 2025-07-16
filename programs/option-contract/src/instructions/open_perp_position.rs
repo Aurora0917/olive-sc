@@ -1,6 +1,8 @@
 use crate::{
     errors::{PerpetualError, TradingError, PoolError},
+    events::PerpPositionOpened,
     math::{self, f64_to_scaled_price},
+    utils::risk_management::*,
     state::{Contract, Custody, OraclePrice, Pool, User, Position, Side, PositionType},
 };
 use anchor_lang::prelude::*;
@@ -8,7 +10,7 @@ use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer as SplTransfer
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct OpenPerpPositionParams {
-    pub size_usd: u64,              // Position size in USD
+    pub size_amount: u64,              // Position size in USD
     pub collateral_amount: u64,     // Collateral amount in tokens
     pub side: Side,                 // Long or Short
     pub position_type: PositionType, // Market or Limit
@@ -36,7 +38,7 @@ pub fn open_perp_position(
     let user = &mut ctx.accounts.user;
     
     // Basic validation
-    require!(params.size_usd > 0, TradingError::InvalidAmount);
+    require!(params.size_amount > 0, TradingError::InvalidAmount);
     require!(params.collateral_amount > 0, TradingError::InvalidAmount);
     require!(params.max_slippage <= 1000, TradingError::InvalidSlippage); // Max 10%
     require!(!params.pool_name.is_empty(), PoolError::InvalidPoolName);
@@ -73,11 +75,16 @@ pub fn open_perp_position(
         params.collateral_amount as f64 / math::checked_powi(10.0, collateral_decimals as i32)?,
         collateral_price
     )?)?;
+
+    let size_usd = math::checked_as_u64(math::checked_float_mul(
+        params.size_amount as f64 / math::checked_powi(10.0, collateral_decimals as i32)?,
+        collateral_price
+    )?)?;
     
     // Calculate leverage
-    let leverage = math::checked_div(params.size_usd, collateral_usd)?;
+    let leverage = math::checked_div(params.size_amount, params.collateral_amount)?;
     
-    msg!("Position Size USD: {}", params.size_usd);
+    msg!("Position Size USD: {}", size_usd);
     msg!("Collateral USD: {}", collateral_usd);
     msg!("Leverage: {}x", leverage);
     
@@ -89,7 +96,7 @@ pub fn open_perp_position(
     let custodies_vec: Vec<Custody> = custodies_slice.iter().map(|c| (***c).clone()).collect();
     pool.update_rates(current_time, &custodies_vec)?;
     
-    // Validate leverage (250x max)
+    // Validate leverage (100x max)
     require!(
         leverage <= Position::MAX_LEVERAGE && leverage >= 1,
         PerpetualError::InvalidLeverage
@@ -104,7 +111,7 @@ pub fn open_perp_position(
     
     // Calculate margin requirements
     let initial_margin_bps = math::checked_div(10_000u64, leverage)?; // 10000 / leverage
-    let maintenance_margin_bps = math::checked_div(initial_margin_bps, 2)?; // Half of initial
+    
     
     // Ensure minimum margin requirements
     require!(
@@ -121,7 +128,6 @@ pub fn open_perp_position(
     
     let liquidation_price = calculate_liquidation_price(
         entry_price,
-        maintenance_margin_bps,
         params.side
     )?;
     
@@ -131,10 +137,10 @@ pub fn open_perp_position(
     // Check pool liquidity
     let required_liquidity = if params.side == Side::Long {
         // For longs, need SOL backing
-        math::checked_as_u64(params.size_usd as f64 / sol_price_value)?
+        math::checked_as_u64(size_usd as f64 / sol_price_value)?
     } else {
         // For shorts, need USDC backing
-        params.size_usd
+        size_usd
     };
     
     if params.side == Side::Long {
@@ -204,14 +210,12 @@ pub fn open_perp_position(
     position.side = params.side;
     position.is_liquidated = false;
     position.price = entry_price;
-    position.size_usd = params.size_usd;
-    position.borrow_size_usd = params.size_usd - collateral_usd; // Borrowed amount
+    position.size_usd = size_usd;
+    position.borrow_size_usd = size_usd - collateral_usd; // Borrowed amount
     position.collateral_usd = collateral_usd;
     position.open_time = current_time;
     position.update_time = current_time;
     position.liquidation_price = liquidation_price;
-    position.initial_margin_bps = initial_margin_bps;
-    position.maintenance_margin_bps = maintenance_margin_bps;
     
     // Set snapshots from current pool state
     position.cumulative_interest_snapshot = pool.cumulative_interest_rate;
@@ -221,10 +225,7 @@ pub fn open_perp_position(
         pool.cumulative_funding_rate_short.try_into().unwrap()
     };
     
-    // Fee tracking
-    let opening_fee = math::checked_div(params.size_usd, 1000)?; // 0.1% opening fee
-    position.opening_fee_paid = opening_fee;
-    position.total_fees_paid = opening_fee;
+    position.total_fees_paid = 0;
     
     // Asset amounts
     position.locked_amount = required_liquidity;
@@ -242,44 +243,43 @@ pub fn open_perp_position(
     
     // Update pool open interest
     if params.side == Side::Long {
-        pool.long_open_interest_usd = math::checked_add(pool.long_open_interest_usd, params.size_usd as u128)?;
+        pool.long_open_interest_usd = math::checked_add(pool.long_open_interest_usd, size_usd as u128)?;
     } else {
-        pool.short_open_interest_usd = math::checked_add(pool.short_open_interest_usd, params.size_usd as u128)?;
+        pool.short_open_interest_usd = math::checked_add(pool.short_open_interest_usd, size_usd as u128)?;
     }
     
     // Update user stats
     user.perp_position_count = user.perp_position_count.checked_add(1).unwrap_or(1);
     
-    msg!("Successfully opened perpetual position");
-    msg!("Position Type: {:?}", params.position_type);
-    msg!("Side: {:?}", params.side);
-    msg!("Size USD: {}", params.size_usd);
-    msg!("Collateral USD: {}", collateral_usd);
-    msg!("Leverage: {}x", leverage);
+    emit!(PerpPositionOpened {
+        owner: position.owner,
+        pool: position.pool,
+        custody: position.custody,
+        collateral_custody: position.collateral_custody,
+        position_type: position.position_type as u8,
+        side: position.side as u8,
+        is_liquidated: position.is_liquidated,
+        price: position.price,
+        size_usd: position.size_usd,
+        borrow_size_usd: position.borrow_size_usd,
+        collateral_usd: position.collateral_usd,
+        open_time: position.open_time,
+        update_time: position.update_time,
+        liquidation_price: position.liquidation_price,
+        cumulative_interest_snapshot: position.cumulative_interest_snapshot,
+        cumulative_funding_snapshot: position.cumulative_funding_snapshot,
+        opening_fee_paid: position.opening_fee_paid,
+        total_fees_paid: position.total_fees_paid,
+        locked_amount: position.locked_amount,
+        collateral_amount: position.collateral_amount,
+        take_profit_price: position.take_profit_price,
+        stop_loss_price: position.stop_loss_price,
+        trigger_price: position.trigger_price,
+        trigger_above_threshold: position.trigger_above_threshold,
+        bump: position.bump,
+    });
     
     Ok(())
-}
-
-fn calculate_liquidation_price(
-    entry_price: u64,
-    maintenance_margin_bps: u64,
-    side: Side
-) -> Result<u64> {
-    let entry_price_f64 = math::checked_float_div(entry_price as f64, crate::math::PRICE_SCALE as f64)?;
-    let margin_ratio = maintenance_margin_bps as f64 / 10_000.0;
-    
-    let liquidation_price_f64 = match side {
-        Side::Long => {
-            // Long liquidation: price falls by margin ratio
-            math::checked_float_mul(entry_price_f64, 1.0 - margin_ratio)?
-        },
-        Side::Short => {
-            // Short liquidation: price rises by margin ratio
-            math::checked_float_mul(entry_price_f64, 1.0 + margin_ratio)?
-        }
-    };
-    
-    f64_to_scaled_price(liquidation_price_f64)
 }
 
 #[derive(Accounts)]
