@@ -22,9 +22,18 @@ pub fn close_perp_position(
     msg!("Closing {}% of perpetual position", params.close_percentage);
     
     let contract = &ctx.accounts.contract;
+    let pool = &mut ctx.accounts.pool;
     let position = &mut ctx.accounts.position;
     let sol_custody = &mut ctx.accounts.sol_custody;
     let usdc_custody = &mut ctx.accounts.usdc_custody;
+    
+    // Update pool rates using the borrow rate curve
+    let current_time = Clock::get()?.unix_timestamp;
+    
+    // Get custody accounts for utilization calculation
+    let custodies_slice = [sol_custody.as_ref(), usdc_custody.as_ref()];
+    let custodies_vec: Vec<Custody> = custodies_slice.iter().map(|c| (***c).clone()).collect();
+    pool.update_rates(current_time, &custodies_vec)?;
     
     // Validation
     require_keys_eq!(position.owner, ctx.accounts.owner.key(), TradingError::Unauthorized);
@@ -62,8 +71,15 @@ pub fn close_perp_position(
     let pnl = position.calculate_pnl(current_price_scaled)?;
     
     // Calculate funding and interest payments
-    let funding_payment = position.calculate_funding_payment(0)?; // TODO: Get from pool
-    let interest_payment = position.calculate_interest_payment(0)?; // TODO: Get from pool
+    let funding_payment = pool.get_funding_payment(
+        position.side == Side::Long,
+        position.size_usd as u128,
+        position.cumulative_funding_snapshot.try_into().unwrap()
+    )?;
+    let interest_payment = pool.get_interest_payment(
+        position.borrow_size_usd as u128,
+        position.cumulative_interest_snapshot
+    )?;
     
     // Calculate amounts to close (proportional to percentage)
     let close_ratio = params.close_percentage as f64 / 100.0;
@@ -95,13 +111,13 @@ pub fn close_perp_position(
     let funding_for_closed_portion = if is_full_close {
         funding_payment
     } else {
-        (funding_payment as f64 * close_ratio) as i64
+        ((funding_payment as f64 * close_ratio) as i64).into()
     };
     
     let interest_for_closed_portion = if is_full_close {
         interest_payment
     } else {
-        math::checked_as_u64(interest_payment as f64 * close_ratio)?
+        math::checked_as_u64(interest_payment as f64 * close_ratio)?.into()
     };
     
     msg!("Size USD to close: {}", size_usd_to_close);
@@ -111,7 +127,7 @@ pub fn close_perp_position(
     msg!("Interest for closed portion: {}", interest_for_closed_portion);
     
     // Calculate net settlement amount
-    let mut net_settlement = collateral_usd_to_close as i64 + pnl_for_closed_portion - funding_for_closed_portion - interest_for_closed_portion as i64;
+    let mut net_settlement = collateral_usd_to_close as i64 + pnl_for_closed_portion - funding_for_closed_portion as i64 - interest_for_closed_portion as i64;
     
     // Ensure settlement is not negative
     if net_settlement < 0 {
@@ -184,6 +200,13 @@ pub fn close_perp_position(
         )?;
     }
     
+    // Update pool open interest
+    if position.side == Side::Long {
+        pool.long_open_interest_usd = math::checked_sub(pool.long_open_interest_usd, size_usd_to_close as u128)?;
+    } else {
+        pool.short_open_interest_usd = math::checked_sub(pool.short_open_interest_usd, size_usd_to_close as u128)?;
+    }
+    
     // Update or close position
     if is_full_close {
         position.is_liquidated = true; // Mark as closed
@@ -203,7 +226,7 @@ pub fn close_perp_position(
     // Update fee tracking
     let closing_fee = math::checked_div(size_usd_to_close, 1000)?; // 0.1% closing fee
     position.total_fees_paid = math::checked_add(position.total_fees_paid, closing_fee)?;
-    position.total_fees_paid = math::checked_add(position.total_fees_paid, interest_for_closed_portion)?;
+    position.total_fees_paid = math::checked_add(position.total_fees_paid, interest_for_closed_portion.try_into().unwrap())?;
     
     position.update_time = current_time;
     

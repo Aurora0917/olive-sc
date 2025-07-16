@@ -4,7 +4,7 @@ use crate::{
     state::{Contract, Custody, OraclePrice, Pool, Position, PositionType, Side, User},
 };
 use anchor_lang::prelude::*;
-use anchor_spl::token::{Mint, Token, TokenAccount};
+use anchor_spl::token::{Mint, Token};
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct ExecuteLimitOrderParams {
@@ -21,9 +21,9 @@ pub fn execute_limit_order(
     
     let contract = &ctx.accounts.contract;
     let position = &mut ctx.accounts.position;
-    let pool = &ctx.accounts.pool;
-    let sol_custody = &mut ctx.accounts.sol_custody;
-    let usdc_custody = &mut ctx.accounts.usdc_custody;
+    let pool = &mut ctx.accounts.pool;
+    let _sol_custody = &mut ctx.accounts.sol_custody;
+    let _usdc_custody = &mut ctx.accounts.usdc_custody;
     
     // Validation
     require_keys_eq!(position.owner, ctx.accounts.owner.key(), TradingError::Unauthorized);
@@ -37,7 +37,7 @@ pub fn execute_limit_order(
     let usdc_price = OraclePrice::new_from_oracle(&ctx.accounts.usdc_oracle_account, current_time, false)?;
     
     let current_sol_price = sol_price.get_price();
-    let usdc_price_value = usdc_price.get_price();
+    let _usdc_price_value = usdc_price.get_price();
     let execution_price_scaled = f64_to_scaled_price(params.execution_price)?;
     
     msg!("Current SOL price: {}", current_sol_price);
@@ -70,8 +70,12 @@ pub fn execute_limit_order(
     
     // Get current cumulative funding and interest snapshots from pool
     // These will be set when the position becomes a market position
-    let current_cumulative_funding = pool.cumulative_funding_rate_long; // TODO: Get actual funding rate
-    let current_cumulative_interest = pool.cumulative_interest_rate_long; // TODO: Get actual interest rate
+    let current_cumulative_funding = if position.side == Side::Long {
+        pool.cumulative_funding_rate_long
+    } else {
+        pool.cumulative_funding_rate_short
+    };
+    let current_cumulative_interest = pool.cumulative_interest_rate;
     
     // Execute the limit order (convert to market position)
     position.execute_limit_order(execution_price_scaled, current_time)?;
@@ -81,26 +85,21 @@ pub fn execute_limit_order(
     
     // Set funding and interest snapshots to current values (start tracking from execution)
     // Limit orders don't pay funding/interest until they become market positions
-    position.cumulative_funding_snapshot = current_cumulative_funding;
+    position.cumulative_funding_snapshot = current_cumulative_funding.try_into().unwrap();
     position.cumulative_interest_snapshot = current_cumulative_interest;
     
-    // Update custody stats - position is now active and consuming liquidity
+    // Update pool open interest tracking
     if position.side == Side::Long {
-        sol_custody.positions_long = math::checked_add(sol_custody.positions_long, 1)?;
-        sol_custody.open_interest_long = math::checked_add(
-            sol_custody.open_interest_long,
-            position.size_usd
+        pool.long_open_interest_usd = math::checked_add(
+            pool.long_open_interest_usd,
+            position.size_usd as u128
         )?;
     } else {
-        sol_custody.positions_short = math::checked_add(sol_custody.positions_short, 1)?;
-        sol_custody.open_interest_short = math::checked_add(
-            sol_custody.open_interest_short,
-            position.size_usd
+        pool.short_open_interest_usd = math::checked_add(
+            pool.short_open_interest_usd,
+            position.size_usd as u128
         )?;
     }
-    
-    // Update pool stats
-    pool.open_interest = math::checked_add(pool.open_interest, position.size_usd)?;
     
     msg!("Successfully executed limit order");
     msg!("Position converted to market position");

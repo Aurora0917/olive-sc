@@ -23,6 +23,8 @@ pub use add_collateral::*;
 pub use remove_collateral::*;
 pub use liquidate::*;
 pub use set_tp_sl::*;
+pub use cancel_limit_order::*;
+pub use execute_limit_order::*;
 
 pub mod close_option;
 pub mod exercise_option;
@@ -49,3 +51,5 @@ pub mod add_collateral;
 pub mod remove_collateral;
 pub mod liquidate;
 pub mod set_tp_sl;
+pub mod cancel_limit_order;
+pub mod execute_limit_order;

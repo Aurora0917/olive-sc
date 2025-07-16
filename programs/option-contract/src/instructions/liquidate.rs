@@ -20,6 +20,7 @@ pub fn liquidate(
     msg!("Liquidating perpetual position");
     
     let contract = &ctx.accounts.contract;
+    let pool = &mut ctx.accounts.pool;
     let position = &mut ctx.accounts.position;
     let sol_custody = &mut ctx.accounts.sol_custody;
     let usdc_custody = &mut ctx.accounts.usdc_custody;
@@ -64,14 +65,21 @@ pub fn liquidate(
     let pnl = position.calculate_pnl(current_price_scaled)?;
     
     // Calculate funding and interest payments
-    let funding_payment = position.calculate_funding_payment(0)?; // TODO: Get from pool
-    let interest_payment = position.calculate_interest_payment(0)?; // TODO: Get from pool
+    let funding_payment = pool.get_funding_payment(
+        position.side == Side::Long,
+        position.size_usd as u128,
+        position.cumulative_funding_snapshot.try_into().unwrap()
+    )?;
+    let interest_payment = pool.get_interest_payment(
+        position.borrow_size_usd as u128,
+        position.cumulative_interest_snapshot
+    )?;
     
     // Calculate liquidator reward (0.5% of position size)
     let liquidator_reward_usd = math::checked_div(position.size_usd, 200)?; // 0.5%
     
     // Calculate net settlement after all deductions
-    let mut net_settlement = position.collateral_usd as i64 + pnl - funding_payment - interest_payment as i64 - liquidator_reward_usd as i64;
+    let mut net_settlement = position.collateral_usd as i64 + pnl - funding_payment as i64 - interest_payment as i64 - liquidator_reward_usd as i64;
     
     // Ensure settlement is not negative
     if net_settlement < 0 {
@@ -176,7 +184,7 @@ pub fn liquidate(
     // Update fee tracking
     let liquidation_fee = math::checked_div(position.size_usd, 100)?; // 1% liquidation fee
     position.total_fees_paid = math::checked_add(position.total_fees_paid, liquidation_fee)?;
-    position.total_fees_paid = math::checked_add(position.total_fees_paid, interest_payment)?;
+    position.total_fees_paid = math::checked_add(position.total_fees_paid, interest_payment.try_into().unwrap())?;
     position.total_fees_paid = math::checked_add(position.total_fees_paid, liquidator_reward_usd)?;
     
     msg!("Successfully liquidated position");

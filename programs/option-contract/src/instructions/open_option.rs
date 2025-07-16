@@ -85,6 +85,8 @@ pub fn open_option(ctx: Context<OpenOption>, params: &OpenOptionParams) -> Resul
     let oracle_price = token_price.get_price();
     let period_year = math::checked_as_f64(math::checked_float_div(params.period as f64, 365.0)?)?;
 
+    
+    msg!("owner: {}", owner.key());
     msg!("oracle_price: {}", oracle_price);
     msg!("params.strike: {}", params.strike);
     msg!("period_year: {}", period_year);
@@ -104,7 +106,7 @@ pub fn open_option(ctx: Context<OpenOption>, params: &OpenOptionParams) -> Resul
         custody.key() == locked_custody.key(), // Asset type for rate calculation
     )?;
     
-    msg!("Enhanced premium with borrow rate: {}", premium);
+    msg!("premium: {}", premium);
 
     let pay_token_price = OraclePrice::new_from_oracle(pay_custody_oracle_account, curtime, false)?;
 
@@ -147,6 +149,14 @@ pub fn open_option(ctx: Context<OpenOption>, params: &OpenOptionParams) -> Resul
         locked_custody.token_locked,
         PoolError::InvalidPoolBalanceError
     );
+
+    msg!("index: {}", option_index);
+    msg!("period: {}", params.period);
+    msg!("amount: {}", params.amount);
+    msg!("limit price: {}", 0);
+    msg!("executed: {}", false);
+    msg!("expired date: {}", params.expired_time);
+    msg!("purchase date: {}", params.expired_time);
 
     // store option data
     option_detail.amount = params.amount;

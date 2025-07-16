@@ -496,7 +496,7 @@ const addUSDCLiquidity = async (_poolName: string) => {
 
   const addLiquidity_USDC_Tx = await program.methods
     .addLiquidity({
-      amountIn: new anchor.BN(1_000_000_000_000),
+      amountIn: new anchor.BN(30_000_000_000_000),
       minLpAmountOut: new anchor.BN(100_000),
       poolName: _poolName,
     })

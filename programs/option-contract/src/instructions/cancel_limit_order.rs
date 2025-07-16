@@ -43,23 +43,14 @@ pub fn cancel_limit_order(
     let collateral_to_refund = position.collateral_amount;
     let collateral_usd_to_refund = position.collateral_usd;
     
-    // Determine refund asset and calculate refund amount
-    let (refund_custody, refund_token_account) = if params.receive_sol {
-        (sol_custody, &ctx.accounts.sol_custody_token_account)
-    } else {
-        (usdc_custody, &ctx.accounts.usdc_custody_token_account)
-    };
+    // Store custody keys first to avoid borrowing issues
+    let sol_custody_key = sol_custody.key();
+    let _usdc_custody_key = usdc_custody.key();
     
     // Transfer collateral back to user
     if collateral_to_refund > 0 {
-        // Use the same collateral asset that was originally deposited
-        let original_collateral_custody = if position.collateral_custody == sol_custody.key() {
-            sol_custody
-        } else {
-            usdc_custody
-        };
-        
-        let original_token_account = if position.collateral_custody == sol_custody.key() {
+        // Determine which token account to use for transfer
+        let original_token_account = if position.collateral_custody == sol_custody_key {
             &ctx.accounts.sol_custody_token_account
         } else {
             &ctx.accounts.usdc_custody_token_account
@@ -75,7 +66,7 @@ pub fn cancel_limit_order(
         )?;
         
         // Update custody stats - remove collateral from pool
-        if position.collateral_custody == sol_custody.key() {
+        if position.collateral_custody == sol_custody_key {
             sol_custody.token_owned = math::checked_sub(
                 sol_custody.token_owned,
                 collateral_to_refund

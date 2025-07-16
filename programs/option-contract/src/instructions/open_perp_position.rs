@@ -29,7 +29,7 @@ pub fn open_perp_position(
     
     let owner = &ctx.accounts.owner;
     let contract = &ctx.accounts.contract;
-    let pool = &ctx.accounts.pool;
+    let pool = &mut ctx.accounts.pool;
     let sol_custody = &mut ctx.accounts.sol_custody;
     let usdc_custody = &mut ctx.accounts.usdc_custody;
     let position = &mut ctx.accounts.position;
@@ -80,6 +80,14 @@ pub fn open_perp_position(
     msg!("Position Size USD: {}", params.size_usd);
     msg!("Collateral USD: {}", collateral_usd);
     msg!("Leverage: {}x", leverage);
+    
+    // Update pool rates using the borrow rate curve
+    let current_time = Clock::get()?.unix_timestamp;
+    
+    // Get custody accounts for utilization calculation  
+    let custodies_slice = [sol_custody.as_ref(), usdc_custody.as_ref()];
+    let custodies_vec: Vec<Custody> = custodies_slice.iter().map(|c| (***c).clone()).collect();
+    pool.update_rates(current_time, &custodies_vec)?;
     
     // Validate leverage (250x max)
     require!(
@@ -205,9 +213,13 @@ pub fn open_perp_position(
     position.initial_margin_bps = initial_margin_bps;
     position.maintenance_margin_bps = maintenance_margin_bps;
     
-    // Set snapshots (TODO: implement proper funding/interest tracking in pool)
-    position.cumulative_interest_snapshot = 0;
-    position.cumulative_funding_snapshot = 0;
+    // Set snapshots from current pool state
+    position.cumulative_interest_snapshot = pool.cumulative_interest_rate;
+    position.cumulative_funding_snapshot = if position.side == Side::Long {
+        pool.cumulative_funding_rate_long.try_into().unwrap()
+    } else {
+        pool.cumulative_funding_rate_short.try_into().unwrap()
+    };
     
     // Fee tracking
     let opening_fee = math::checked_div(params.size_usd, 1000)?; // 0.1% opening fee
@@ -227,6 +239,13 @@ pub fn open_perp_position(
     position.trigger_above_threshold = params.trigger_above_threshold;
     
     position.bump = ctx.bumps.position;
+    
+    // Update pool open interest
+    if params.side == Side::Long {
+        pool.long_open_interest_usd = math::checked_add(pool.long_open_interest_usd, params.size_usd as u128)?;
+    } else {
+        pool.short_open_interest_usd = math::checked_add(pool.short_open_interest_usd, params.size_usd as u128)?;
+    }
     
     // Update user stats
     user.perp_position_count = user.perp_position_count.checked_add(1).unwrap_or(1);

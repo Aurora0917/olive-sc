@@ -11,7 +11,7 @@ pub mod utils;
 
 use state::OptionDetail;
 
-declare_id!("Gz4U6LcbehnjbuhVXEFEAAomXHuQPU4TrwYyR56NPGnc");
+declare_id!("FJHiFT7Deh8mKNzQDjBveWpirgTCdNDfnLTnWec1LxdT");
 
 #[program]
 pub mod option_contract {
@@ -163,6 +163,16 @@ pub mod option_contract {
     // Set TP/SL for existing position
     pub fn set_tp_sl(ctx: Context<SetTpSl>, params: SetTpSlParams) -> Result<()> {
         instructions::set_tp_sl::set_tp_sl(ctx, &params)
+    }
+
+    // Cancel limit order
+    pub fn cancel_limit_order(ctx: Context<CancelLimitOrder>, params: CancelLimitOrderParams) -> Result<()> {
+        instructions::cancel_limit_order::cancel_limit_order(ctx, &params)
+    }
+
+    // Execute limit order when conditions are met
+    pub fn execute_limit_order(ctx: Context<ExecuteLimitOrder>, params: ExecuteLimitOrderParams) -> Result<()> {
+        instructions::execute_limit_order::execute_limit_order(ctx, &params)
     }
 }
 

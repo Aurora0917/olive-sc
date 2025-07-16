@@ -40,6 +40,22 @@ pub fn add_pool<'info>(ctx: Context<'_, '_, '_, 'info, AddPool<'info>>, params: 
     pool.name = params.name.clone();
     pool.bump = ctx.bumps.pool;
     pool.lp_token_bump = ctx.bumps.lp_token_mint;
+    
+    // Initialize borrow rate curve with default parameters
+    pool.initialize_borrow_rate_curve()?;
+    
+    // Initialize rate tracking fields
+    pool.cumulative_funding_rate_long = 0;
+    pool.cumulative_funding_rate_short = 0;
+    pool.cumulative_interest_rate = 0;
+    pool.last_rate_update = Clock::get()?.unix_timestamp;
+    
+    // Initialize open interest tracking
+    pool.long_open_interest_usd = 0;
+    pool.short_open_interest_usd = 0;
+    pool.total_borrowed_usd = 0;
+    pool.last_utilization_update = Clock::get()?.unix_timestamp;
+    
     contract.pools.push(ctx.accounts.pool.key());
     Ok(0)
 }
