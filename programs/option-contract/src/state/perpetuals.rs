@@ -68,6 +68,9 @@ pub struct Position {
     pub take_profit_price: Option<u64>,     // Backend monitors, executes when hit
     pub stop_loss_price: Option<u64>,       // Backend monitors, executes when hit
     
+    // TP/SL Orderbook reference (optional advanced feature)
+    pub tp_sl_orderbook: Option<Pubkey>,    // Optional reference to TpSlOrderbook account
+    
     // Limit Order (for limit perp)
     pub trigger_price: Option<u64>,         // Price to execute limit order
     pub trigger_above_threshold: bool,      // true = execute when price >= trigger
@@ -77,7 +80,7 @@ pub struct Position {
 
 
 impl Position {
-    pub const LEN: usize = 8 + std::mem::size_of::<Position>();
+    pub const LEN: usize = 8 + std::mem::size_of::<Position>() + 33; // Added 33 bytes for Option<Pubkey>
     
     // 250x leverage = 0.4% initial margin
     pub const MAX_LEVERAGE: u64 = 100;

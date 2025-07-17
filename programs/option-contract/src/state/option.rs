@@ -36,11 +36,14 @@ pub struct OptionDetail {
     // TP/SL FIELDS
     pub take_profit_price: Option<u64>,  // Take profit price (scaled by 1e6)
     pub stop_loss_price: Option<u64>,    // Stop loss price (scaled by 1e6)
+    
+    // TP/SL Orderbook reference (optional advanced feature)
+    pub tp_sl_orderbook: Option<Pubkey>, // Optional reference to TpSlOrderbook account
 }
 
 impl OptionDetail {
-    // Updated length calculation: added 8 bytes for entry_price (u64) + 8 bytes for last_update_time (i64) + 18 bytes for TP/SL (Option<u64> * 2)
-    pub const LEN: usize = 8 * 15 + 4 + 32 * 5 + 8 + 18;
+    // Updated length calculation: added 8 bytes for entry_price (u64) + 8 bytes for last_update_time (i64) + 18 bytes for TP/SL (Option<u64> * 2) + 33 bytes for Option<Pubkey>
+    pub const LEN: usize = 8 * 15 + 4 + 32 * 5 + 8 + 18 + 33;
 
     /// Update option with current market data (similar to update_position)
     pub fn update_option(

@@ -173,4 +173,14 @@ pub mod option_contract {
     pub fn execute_limit_order(ctx: Context<ExecuteLimitOrder>, params: ExecuteLimitOrderParams) -> Result<()> {
         instructions::execute_limit_order::execute_limit_order(ctx, &params)
     }
+
+    // Initialize TP/SL orderbook for a position
+    pub fn init_tp_sl_orderbook(ctx: Context<InitTpSlOrderbook>, params: InitTpSlOrderbookParams) -> Result<()> {
+        instructions::init_tp_sl_orderbook::init_tp_sl_orderbook(ctx, &params)
+    }
+
+    // Manage TP/SL orders in orderbook
+    pub fn manage_tp_sl_orders(ctx: Context<ManageTpSlOrders>, params: ManageTpSlOrdersParams) -> Result<()> {
+        instructions::manage_tp_sl_orders::manage_tp_sl_orders(ctx, &params)
+    }
 }

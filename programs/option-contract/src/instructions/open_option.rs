@@ -197,6 +197,7 @@ pub fn open_option(ctx: Context<OpenOption>, params: &OpenOptionParams) -> Resul
     option_detail.last_update_time = curtime;
     option_detail.take_profit_price = None;
     option_detail.stop_loss_price = None;
+    option_detail.tp_sl_orderbook = None; // No orderbook initially
     option_detail.bump = ctx.bumps.option_detail;  
     user.option_index = option_index;
 

@@ -382,3 +382,55 @@ pub struct PoolAdded {
     pub short_open_interest_usd: u128,
     pub total_borrowed_usd: u128,
 }
+
+// TP/SL Orderbook events
+#[event]
+pub struct TpSlOrderbookInitialized {
+    pub owner: Pubkey,
+    pub position: Pubkey,
+    pub position_type: u8,
+    pub bump: u8,
+}
+
+#[event]
+pub struct TpSlOrderAdded {
+    pub owner: Pubkey,
+    pub position: Pubkey,
+    pub position_type: u8,
+    pub order_type: u8, // 0 = TP, 1 = SL
+    pub index: u8,
+    pub price: u64,
+    pub size_percent: u16,
+}
+
+#[event]
+pub struct TpSlOrderUpdated {
+    pub owner: Pubkey,
+    pub position: Pubkey,
+    pub position_type: u8,
+    pub order_type: u8, // 0 = TP, 1 = SL
+    pub index: u8,
+    pub new_price: Option<u64>,
+    pub new_size_percent: Option<u16>,
+}
+
+#[event]
+pub struct TpSlOrderRemoved {
+    pub owner: Pubkey,
+    pub position: Pubkey,
+    pub position_type: u8,
+    pub order_type: u8, // 0 = TP, 1 = SL
+    pub index: u8,
+}
+
+#[event]
+pub struct TpSlOrderExecuted {
+    pub owner: Pubkey,
+    pub position: Pubkey,
+    pub position_type: u8,
+    pub order_type: u8, // 0 = TP, 1 = SL
+    pub index: u8,
+    pub price: u64,
+    pub size_percent: u16,
+    pub execution_time: i64,
+}

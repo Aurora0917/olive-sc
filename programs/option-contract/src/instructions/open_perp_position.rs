@@ -10,7 +10,7 @@ use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer as SplTransfer
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct OpenPerpPositionParams {
-    pub size_amount: u64,              // Position size in USD
+    pub size_amount: u64,              // Position amount in tokens
     pub collateral_amount: u64,     // Collateral amount in tokens
     pub side: Side,                 // Long or Short
     pub position_type: PositionType, // Market or Limit
@@ -35,7 +35,7 @@ pub fn open_perp_position(
     let sol_custody = &mut ctx.accounts.sol_custody;
     let usdc_custody = &mut ctx.accounts.usdc_custody;
     let position = &mut ctx.accounts.position;
-    let user = &mut ctx.accounts.user;
+    let user: &mut Box<Account<'_, User>> = &mut ctx.accounts.user;
     
     // Basic validation
     require!(params.size_amount > 0, TradingError::InvalidAmount);
@@ -74,12 +74,12 @@ pub fn open_perp_position(
     let collateral_usd = math::checked_as_u64(math::checked_float_mul(
         params.collateral_amount as f64 / math::checked_powi(10.0, collateral_decimals as i32)?,
         collateral_price
-    )?)?;
+    )? * 1_000_000.0)?;
 
     let size_usd = math::checked_as_u64(math::checked_float_mul(
         params.size_amount as f64 / math::checked_powi(10.0, collateral_decimals as i32)?,
         collateral_price
-    )?)?;
+    )? * 1_000_000.0)?;
     
     // Calculate leverage
     let leverage = math::checked_div(params.size_amount, params.collateral_amount)?;
@@ -87,9 +87,6 @@ pub fn open_perp_position(
     msg!("Position Size USD: {}", size_usd);
     msg!("Collateral USD: {}", collateral_usd);
     msg!("Leverage: {}x", leverage);
-    
-    // Update pool rates using the borrow rate curve
-    let current_time = Clock::get()?.unix_timestamp;
     
     // Get custody accounts for utilization calculation  
     let custodies_slice = [sol_custody.as_ref(), usdc_custody.as_ref()];
@@ -136,11 +133,15 @@ pub fn open_perp_position(
     
     // Check pool liquidity
     let required_liquidity = if params.side == Side::Long {
-        // For longs, need SOL backing
-        math::checked_as_u64(size_usd as f64 / sol_price_value)?
+        // Convert 6-decimal USD back to actual USD, then to SOL tokens
+        let usd_amount = size_usd as f64 / 1_000_000.0;  // Convert back to actual USD
+        let sol_tokens_needed = usd_amount / sol_price_value;
+        math::checked_as_u64(sol_tokens_needed * math::checked_powi(10.0, sol_custody.decimals as i32)?)?
     } else {
-        // For shorts, need USDC backing
-        size_usd
+        // Convert 6-decimal USD to USDC tokens  
+        let usd_amount = size_usd as f64 / 1_000_000.0;  // Convert back to actual USD
+        let usdc_tokens_needed = usd_amount / usdc_price_value;
+        math::checked_as_u64(usdc_tokens_needed * math::checked_powi(10.0, usdc_custody.decimals as i32)?)?
     };
     
     if params.side == Side::Long {
@@ -175,30 +176,30 @@ pub fn open_perp_position(
     )?;
     
     // Update custody stats
+    if params.side == Side::Long {
+        // Long positions always need SOL backing
+        sol_custody.token_locked = math::checked_add(
+            sol_custody.token_locked,
+            required_liquidity
+        )?;
+    } else {
+        // Short positions always need USDC backing  
+        usdc_custody.token_locked = math::checked_add(
+            usdc_custody.token_locked,
+            required_liquidity
+        )?;
+    }
+
     if params.pay_sol {
         sol_custody.token_owned = math::checked_add(
             sol_custody.token_owned,
             params.collateral_amount
         )?;
-        
-        if params.side == Side::Long {
-            sol_custody.token_locked = math::checked_add(
-                sol_custody.token_locked,
-                required_liquidity
-            )?;
-        }
     } else {
         usdc_custody.token_owned = math::checked_add(
             usdc_custody.token_owned,
             params.collateral_amount
         )?;
-        
-        if params.side == Side::Short {
-            usdc_custody.token_locked = math::checked_add(
-                usdc_custody.token_locked,
-                required_liquidity
-            )?;
-        }
     }
     
     // Initialize position
@@ -224,7 +225,8 @@ pub fn open_perp_position(
     } else {
         pool.cumulative_funding_rate_short.try_into().unwrap()
     };
-    
+
+    position.opening_fee_paid = 0;    
     position.total_fees_paid = 0;
     
     // Asset amounts
@@ -234,6 +236,7 @@ pub fn open_perp_position(
     // TP/SL
     position.take_profit_price = params.take_profit_price;
     position.stop_loss_price = params.stop_loss_price;
+    position.tp_sl_orderbook = None; // No orderbook initially
     
     // Limit order specific
     position.trigger_price = params.trigger_price;

@@ -6,6 +6,7 @@ pub use oracle::*;
 pub use pool::*;
 pub use custody::*;
 pub use perpetuals::*;
+pub use tp_sl_orderbook::*;
 
 pub mod option;
 pub mod user;
@@ -15,3 +16,4 @@ pub mod oracle;
 pub mod pool;
 pub mod custody;
 pub mod perpetuals;
+pub mod tp_sl_orderbook;

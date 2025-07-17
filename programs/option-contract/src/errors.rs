@@ -125,6 +125,8 @@ pub enum PerpetualError {
 pub enum TradingError {
     #[msg("Invalid amount specified")]
     InvalidAmount,
+    #[msg("Invalid position type")]
+    InvalidPositionType,
     #[msg("Invalid slippage tolerance")]
     InvalidSlippage,
     #[msg("Price slippage exceeded limits")]
@@ -163,6 +165,16 @@ pub enum TradingError {
     PrecisionLossError,
     #[msg("Stale price data")]
     StalePriceError,
+    #[msg("Orderbook already exists for this position")]
+    OrderbookAlreadyExists,
+    #[msg("Invalid position for orderbook")]
+    InvalidPosition,
+    #[msg("Position has been liquidated")]
+    PositionLiquidated,
+    #[msg("Invalid option")]
+    InvalidOption,
+    #[msg("Orderbook is full")]
+    OrderbookFull,
 }
 
 // Pool-specific errors

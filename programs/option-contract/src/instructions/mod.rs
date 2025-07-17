@@ -25,6 +25,8 @@ pub use liquidate::*;
 pub use set_tp_sl::*;
 pub use cancel_limit_order::*;
 pub use execute_limit_order::*;
+pub use init_tp_sl_orderbook::*;
+pub use manage_tp_sl_orders::*;
 
 pub mod close_option;
 pub mod exercise_option;
@@ -53,3 +55,5 @@ pub mod liquidate;
 pub mod set_tp_sl;
 pub mod cancel_limit_order;
 pub mod execute_limit_order;
+pub mod init_tp_sl_orderbook;
+pub mod manage_tp_sl_orders;
