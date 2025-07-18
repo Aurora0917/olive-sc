@@ -47,8 +47,9 @@ pub struct Position {
     pub size_usd: u64,                       // Position size in USD
     pub borrow_size_usd: u64,               // Borrowed amount in USD
     pub collateral_usd: u64,                // Collateral value in USD at open
-    pub open_time: i64,
+    pub open_time: i64,                     // When position was created
     pub update_time: i64,                   // Track updates
+    pub execution_time: Option<i64>,        // When limit order was executed (None for market orders)
     
     // Risk Management (Set at open, used for liquidation)
     pub liquidation_price: u64,              // Pre-calculated for efficiency
@@ -165,9 +166,32 @@ impl Position {
         self.position_type = PositionType::Market;
         self.price = execution_price;
         self.trigger_price = None;
-        self.open_time = current_time;
+        self.execution_time = Some(current_time);  // Track when limit order was executed
         self.update_time = current_time;
         Ok(())
+    }
+    
+    /// Check if this position was originally a limit order
+    pub fn was_limit_order(&self) -> bool {
+        // If execution_time exists and is different from open_time, it was a limit order
+        if let Some(execution_time) = self.execution_time {
+            execution_time != self.open_time
+        } else {
+            // If execution_time is None, it's still a pending limit order
+            self.position_type == PositionType::Limit
+        }
+    }
+    
+    /// Check if this is a pending limit order
+    pub fn is_pending_limit_order(&self) -> bool {
+        self.position_type == PositionType::Limit && self.execution_time.is_none()
+    }
+    
+    /// Check if this is an executed limit order (now market position)
+    pub fn is_executed_limit_order(&self) -> bool {
+        self.position_type == PositionType::Market && 
+        self.execution_time.is_some() && 
+        self.execution_time.unwrap() != self.open_time
     }
 
     pub fn is_liquidatable(&self, current_price: u64) -> bool {

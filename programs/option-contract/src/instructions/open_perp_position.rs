@@ -218,6 +218,11 @@ pub fn open_perp_position(
     position.collateral_usd = collateral_usd;
     position.open_time = current_time;
     position.update_time = current_time;
+    position.execution_time = if params.position_type == PositionType::Market {
+        Some(current_time)  // Market orders execute immediately
+    } else {
+        None  // Limit orders start with no execution time
+    };
     position.liquidation_price = liquidation_price;
     
     // Set snapshots from current pool state

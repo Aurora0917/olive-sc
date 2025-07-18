@@ -54,24 +54,21 @@ pub fn add_collateral(
     msg!("Adding {} tokens as collateral", params.collateral_amount);
     
     // Determine collateral asset and calculate USD value
-    let (collateral_custody, collateral_decimals, collateral_price) = 
+    let (collateral_decimals, collateral_price) = 
         if params.pay_sol {
-            (sol_custody.key(), sol_custody.decimals, sol_price_value)
+            (sol_custody.decimals, sol_price_value)
         } else {
-            (usdc_custody.key(), usdc_custody.decimals, usdc_price_value)
+            (usdc_custody.decimals, usdc_price_value)
         };
     
-    // Calculate USD value of added collateral
+    // Calculate USD value of added collateral (scaled to 6 decimals)
     let collateral_usd_to_add = math::checked_as_u64(math::checked_float_mul(
         params.collateral_amount as f64 / math::checked_powi(10.0, collateral_decimals as i32)?,
         collateral_price
-    )?)?;
+    )? * 1_000_000.0)?;
     
     msg!("Collateral USD to add: {}", collateral_usd_to_add);
     msg!("Current collateral USD: {}", position.collateral_usd);
-    
-    // Validate that the new collateral asset matches the existing collateral asset
-    require_keys_eq!(position.collateral_custody, collateral_custody, PerpetualError::InvalidCollateralAsset);
     
     // Transfer collateral from user to pool
     token::transfer(
@@ -90,7 +87,7 @@ pub fn add_collateral(
         params.collateral_amount,
     )?;
     
-    // Update custody stats
+    // Update custody stats based on what asset was actually added
     if params.pay_sol {
         sol_custody.token_owned = math::checked_add(
             sol_custody.token_owned,
@@ -103,22 +100,51 @@ pub fn add_collateral(
         )?;
     }
     
-    // Update position collateral
-    position.collateral_amount = math::checked_add(
-        position.collateral_amount,
-        params.collateral_amount
-    )?;
     
+    // Update position collateral
     position.collateral_usd = math::checked_add(
         position.collateral_usd,
         collateral_usd_to_add
     )?;
     
+    // Convert and add to collateral_amount based on position's collateral custody
+    if position.collateral_custody == sol_custody.key() {
+        // Position stores collateral in SOL
+        let sol_amount_to_add = if params.pay_sol {
+            // Adding SOL to SOL position - direct add
+            params.collateral_amount
+        } else {
+            // Adding USDC to SOL position - convert USDC to SOL
+            let usd_actual = collateral_usd_to_add as f64 / 1_000_000.0;
+            let sol_value = usd_actual / sol_price_value;
+            math::checked_as_u64(sol_value * math::checked_powi(10.0, sol_custody.decimals as i32)?)?
+        };
+        position.collateral_amount = math::checked_add(
+            position.collateral_amount,
+            sol_amount_to_add
+        )?;
+    } else {
+        // Position stores collateral in USDC
+        let usdc_amount_to_add = if params.pay_sol {
+            // Adding SOL to USDC position - convert SOL to USDC
+            let usd_actual = collateral_usd_to_add as f64 / 1_000_000.0;
+            let usdc_value = usd_actual / usdc_price_value;
+            math::checked_as_u64(usdc_value * math::checked_powi(10.0, usdc_custody.decimals as i32)?)?
+        } else {
+            // Adding USDC to USDC position - direct add
+            params.collateral_amount
+        };
+        position.collateral_amount = math::checked_add(
+            position.collateral_amount,
+            usdc_amount_to_add
+        )?;
+    }
+    
     // Recalculate borrow size (position size - collateral)
     position.borrow_size_usd = position.size_usd.saturating_sub(position.collateral_usd);
     
     // Recalculate margin requirements based on new collateral
-    let new_leverage = math::checked_div(position.size_usd, position.collateral_usd)?;
+    let new_leverage = std::cmp::max(math::checked_div(position.size_usd, position.collateral_usd)?, 1);
     
     // Recalculate liquidation price with new margin
     let new_liquidation_price = calculate_liquidation_price(

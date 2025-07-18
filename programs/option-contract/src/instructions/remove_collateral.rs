@@ -51,24 +51,26 @@ pub fn remove_collateral(
     msg!("USDC Price: {}", usdc_price_value);
     msg!("Removing {} tokens from collateral", params.collateral_amount);
     
-    // Determine collateral asset info
-    let (collateral_decimals, collateral_price) = if position.collateral_custody == sol_custody.key() {
-        (sol_custody.decimals, sol_price_value)
+    // Calculate USD value to remove based on what the user wants to withdraw
+    // params.collateral_amount is in the asset user wants to receive (receive_sol)
+    let collateral_usd_to_remove = if params.receive_sol {
+        // User wants to receive SOL, so params.collateral_amount is in SOL
+        math::checked_as_u64(math::checked_float_mul(
+            params.collateral_amount as f64 / math::checked_powi(10.0, sol_custody.decimals as i32)?,
+            sol_price_value
+        )? * 1_000_000.0)?
     } else {
-        (usdc_custody.decimals, usdc_price_value)
+        // User wants to receive USDC, so params.collateral_amount is in USDC
+        math::checked_as_u64(math::checked_float_mul(
+            params.collateral_amount as f64 / math::checked_powi(10.0, usdc_custody.decimals as i32)?,
+            usdc_price_value
+        )? * 1_000_000.0)?
     };
-    
-    // Calculate USD value of removed collateral
-    let collateral_usd_to_remove = math::checked_as_u64(math::checked_float_mul(
-        params.collateral_amount as f64 / math::checked_powi(10.0, collateral_decimals as i32)?,
-        collateral_price
-    )?)?;
     
     msg!("Collateral USD to remove: {}", collateral_usd_to_remove);
     msg!("Current collateral USD: {}", position.collateral_usd);
     
-    // Calculate new collateral amounts
-    let new_collateral_amount = math::checked_sub(position.collateral_amount, params.collateral_amount)?;
+    // Calculate new collateral USD
     let new_collateral_usd = math::checked_sub(position.collateral_usd, collateral_usd_to_remove)?;
     
     // Calculate new leverage and ensure it doesn't exceed limits
@@ -122,20 +124,25 @@ pub fn remove_collateral(
         PerpetualError::InsufficientMargin
     );
     
-    // Calculate withdrawal amount in requested asset
-    let (withdrawal_amount, withdrawal_decimals) = if params.receive_sol {
-        let amount = math::checked_as_u64(collateral_usd_to_remove as f64 / sol_price_value)?;
-        (amount, sol_custody.decimals)
-    } else {
-        let amount = math::checked_as_u64(collateral_usd_to_remove as f64 / usdc_price_value)?;
-        (amount, usdc_custody.decimals)
-    };
-    
-    let withdrawal_tokens = math::checked_as_u64(
-        withdrawal_amount as f64 * math::checked_powi(10.0, withdrawal_decimals as i32)?
-    )?;
+    // The withdrawal amount is exactly what the user requested
+    let withdrawal_tokens = params.collateral_amount;
     
     msg!("Withdrawal tokens: {}", withdrawal_tokens);
+    
+    // Check if custody has enough tokens for withdrawal
+    if params.receive_sol {
+        require_gte!(
+            sol_custody.token_owned,
+            withdrawal_tokens,
+            TradingError::InsufficientBalance
+        );
+    } else {
+        require_gte!(
+            usdc_custody.token_owned,
+            withdrawal_tokens,
+            TradingError::InsufficientBalance
+        );
+    }
     
     // Transfer withdrawal to user
     if withdrawal_tokens > 0 {
@@ -152,21 +159,50 @@ pub fn remove_collateral(
         )?;
     }
     
-    // Update custody stats
-    if position.collateral_custody == sol_custody.key() {
+    // Update custody stats based on where tokens are withdrawn from
+    // This accounts for cross-asset withdrawals (e.g., withdrawing SOL from USDC collateral)
+    if params.receive_sol {
         sol_custody.token_owned = math::checked_sub(
             sol_custody.token_owned,
-            params.collateral_amount
+            withdrawal_tokens
         )?;
     } else {
         usdc_custody.token_owned = math::checked_sub(
             usdc_custody.token_owned,
-            params.collateral_amount
+            withdrawal_tokens
         )?;
     }
     
     // Update position
-    position.collateral_amount = new_collateral_amount;
+    // Calculate how much to subtract from the stored collateral amount
+    let collateral_amount_to_subtract = if position.collateral_custody == sol_custody.key() {
+        // Position stores SOL
+        if params.receive_sol {
+            // Withdrawing SOL from SOL position - direct subtract
+            params.collateral_amount
+        } else {
+            // Withdrawing USDC from SOL position - convert USDC to SOL equivalent
+            let usd_value = collateral_usd_to_remove as f64 / 1_000_000.0;
+            let sol_value = usd_value / sol_price_value;
+            math::checked_as_u64(sol_value * math::checked_powi(10.0, sol_custody.decimals as i32)?)?
+        }
+    } else {
+        // Position stores USDC
+        if params.receive_sol {
+            // Withdrawing SOL from USDC position - convert SOL to USDC equivalent
+            let usd_value = collateral_usd_to_remove as f64 / 1_000_000.0;
+            let usdc_value = usd_value / usdc_price_value;
+            math::checked_as_u64(usdc_value * math::checked_powi(10.0, usdc_custody.decimals as i32)?)?
+        } else {
+            // Withdrawing USDC from USDC position - direct subtract
+            params.collateral_amount
+        }
+    };
+    
+    position.collateral_amount = math::checked_sub(
+        position.collateral_amount,
+        collateral_amount_to_subtract
+    )?;
     position.collateral_usd = new_collateral_usd;
     position.borrow_size_usd = position.size_usd.saturating_sub(position.collateral_usd);
     position.liquidation_price = new_liquidation_price;
