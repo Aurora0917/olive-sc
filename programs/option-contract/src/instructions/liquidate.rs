@@ -65,12 +65,8 @@ pub fn liquidate(
     // Calculate P&L
     let pnl = position.calculate_pnl(current_price_scaled)?;
     
-    // Calculate funding and interest payments
-    let funding_payment = pool.get_funding_payment(
-        position.side == Side::Long,
-        position.size_usd as u128,
-        position.cumulative_funding_snapshot.try_into().unwrap()
-    )?;
+    // Calculate only borrow fees (no funding in peer-to-pool model)
+    let funding_payment = 0i128; // No funding in peer-to-pool model
     let interest_payment = pool.get_interest_payment(
         position.borrow_size_usd as u128,
         position.cumulative_interest_snapshot
@@ -204,7 +200,6 @@ pub fn liquidate(
         update_time: position.update_time,
         liquidation_price: position.liquidation_price,
         cumulative_interest_snapshot: position.cumulative_interest_snapshot,
-        cumulative_funding_snapshot: position.cumulative_funding_snapshot,
         opening_fee_paid: position.opening_fee_paid,
         total_fees_paid: position.total_fees_paid,
         locked_amount: position.locked_amount,

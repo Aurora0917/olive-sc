@@ -53,9 +53,11 @@ pub struct Position {
     // Risk Management (Set at open, used for liquidation)
     pub liquidation_price: u64,              // Pre-calculated for efficiency
     
-    // Funding & Interest Tracking
-    pub cumulative_interest_snapshot: u128,  // Pool's cumulative at position open
-    pub cumulative_funding_snapshot: u128,   // Pool's funding at position open
+    // Borrow Fee Tracking
+    pub cumulative_interest_snapshot: u128,  // Pool's cumulative borrow rate at position open
+    
+    // Accrued Amounts (settled on close)
+    pub accrued_borrow_fees: u64,           // Accrued borrow fees (always positive, always paid by position)
     
     // Fee Tracking
     pub total_fees_paid: u64,               // All fees paid
@@ -128,6 +130,18 @@ impl Position {
     ) -> Result<()> {
         self.take_profit_price = take_profit;
         self.stop_loss_price = stop_loss;
+        Ok(())
+    }
+    
+    pub fn update_accrued_borrow_fees(
+        &mut self,
+        borrow_fee_payment: u64,
+        new_interest_snapshot: u128,
+        current_time: i64,
+    ) -> Result<()> {
+        self.accrued_borrow_fees = math::checked_add(self.accrued_borrow_fees, borrow_fee_payment)?;
+        self.cumulative_interest_snapshot = new_interest_snapshot;
+        self.update_time = current_time;
         Ok(())
     }
 
@@ -206,8 +220,9 @@ impl Position {
         Ok(pnl as i64)
     }
     
-    pub fn calculate_funding_payment(&self, current_cumulative_funding: u128) -> Result<i64> {
-        let funding_diff = current_cumulative_funding - self.cumulative_funding_snapshot;
+    pub fn calculate_funding_payment(&self, _current_cumulative_funding: u128) -> Result<i64> {
+        // No funding in peer-to-pool model, always return 0
+        let funding_diff = 0i128;
         let funding_payment = math::checked_mul(
             funding_diff as i128,
             self.size_usd as i128,

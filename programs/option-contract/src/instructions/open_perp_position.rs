@@ -222,11 +222,6 @@ pub fn open_perp_position(
     
     // Set snapshots from current pool state
     position.cumulative_interest_snapshot = pool.cumulative_interest_rate;
-    position.cumulative_funding_snapshot = if position.side == Side::Long {
-        pool.cumulative_funding_rate_long.try_into().unwrap()
-    } else {
-        pool.cumulative_funding_rate_short.try_into().unwrap()
-    };
 
     position.opening_fee_paid = 0;    
     position.total_fees_paid = 0;
@@ -273,7 +268,6 @@ pub fn open_perp_position(
         update_time: position.update_time,
         liquidation_price: position.liquidation_price,
         cumulative_interest_snapshot: position.cumulative_interest_snapshot,
-        cumulative_funding_snapshot: position.cumulative_funding_snapshot,
         opening_fee_paid: position.opening_fee_paid,
         total_fees_paid: position.total_fees_paid,
         locked_amount: position.locked_amount,

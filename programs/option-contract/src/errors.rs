@@ -56,6 +56,8 @@ pub enum PerpetualError {
     WouldCauseLiquidation,
     #[msg("Insufficient margin")]
     InsufficientMargin,
+    #[msg("Insufficient collateral to pay funding fees")]
+    InsufficientCollateralForFunding,
     #[msg("Invalid position type")]
     InvalidPositionType,
     #[msg("Position is not a limit order")]
@@ -155,6 +157,8 @@ pub enum TradingError {
     InvalidTakeProfitPrice,
     #[msg("Invalid stop loss price")]
     InvalidStopLossPrice,
+    #[msg("Position size too small")]
+    PositionTooSmall,
     #[msg("Insufficient balance to cover premium/collateral")]
     InvalidSignerBalanceError,
     #[msg("Invalid locked balance in custody")]

@@ -73,12 +73,7 @@ pub fn close_perp_position(
     // Calculate P&L
     let pnl = position.calculate_pnl(current_price_scaled)?;
     
-    // Calculate funding and interest payments
-    let funding_payment = pool.get_funding_payment(
-        position.side == Side::Long,
-        position.size_usd as u128,
-        position.cumulative_funding_snapshot.try_into().unwrap()
-    )?;
+    // Calculate only borrow fees (no funding in peer-to-pool model)
     let interest_payment = pool.get_interest_payment(
         position.borrow_size_usd as u128,
         position.cumulative_interest_snapshot
@@ -111,11 +106,7 @@ pub fn close_perp_position(
         (pnl as f64 * close_ratio) as i64
     };
     
-    let funding_for_closed_portion = if is_full_close {
-        funding_payment
-    } else {
-        ((funding_payment as f64 * close_ratio) as i64).into()
-    };
+    // No funding in peer-to-pool model
     
     let interest_for_closed_portion = if is_full_close {
         interest_payment
@@ -126,11 +117,11 @@ pub fn close_perp_position(
     msg!("Size USD to close: {}", size_usd_to_close);
     msg!("Collateral amount to close: {}", collateral_amount_to_close);
     msg!("P&L for closed portion: {}", pnl_for_closed_portion);
-    msg!("Funding for closed portion: {}", funding_for_closed_portion);
+    // No funding fees in peer-to-pool model
     msg!("Interest for closed portion: {}", interest_for_closed_portion);
     
-    // Calculate net settlement amount
-    let mut net_settlement = collateral_usd_to_close as i64 + pnl_for_closed_portion - funding_for_closed_portion as i64 - interest_for_closed_portion as i64;
+    // Calculate net settlement amount (no funding fees in peer-to-pool model)
+    let mut net_settlement = collateral_usd_to_close as i64 + pnl_for_closed_portion - interest_for_closed_portion as i64;
     
     // Ensure settlement is not negative
     if net_settlement < 0 {
@@ -249,7 +240,6 @@ pub fn close_perp_position(
         update_time: position.update_time,
         liquidation_price: position.liquidation_price,
         cumulative_interest_snapshot: position.cumulative_interest_snapshot,
-        cumulative_funding_snapshot: position.cumulative_funding_snapshot,
         opening_fee_paid: position.opening_fee_paid,
         total_fees_paid: position.total_fees_paid,
         locked_amount: position.locked_amount,

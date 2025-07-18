@@ -74,7 +74,7 @@ pub fn execute_limit_order(
     
     // Get current cumulative funding and interest snapshots from pool
     // These will be set when the position becomes a market position
-    let current_cumulative_funding = if position.side == Side::Long {
+    let _current_cumulative_funding = if position.side == Side::Long {
         pool.cumulative_funding_rate_long
     } else {
         pool.cumulative_funding_rate_short
@@ -89,7 +89,7 @@ pub fn execute_limit_order(
     
     // Set funding and interest snapshots to current values (start tracking from execution)
     // Limit orders don't pay funding/interest until they become market positions
-    position.cumulative_funding_snapshot = current_cumulative_funding.try_into().unwrap();
+    // No funding snapshot update needed in peer-to-pool model;
     position.cumulative_interest_snapshot = current_cumulative_interest;
     
     // Update pool open interest tracking
@@ -121,7 +121,6 @@ pub fn execute_limit_order(
         update_time: position.update_time,
         liquidation_price: position.liquidation_price,
         cumulative_interest_snapshot: position.cumulative_interest_snapshot,
-        cumulative_funding_snapshot: position.cumulative_funding_snapshot,
         opening_fee_paid: position.opening_fee_paid,
         total_fees_paid: position.total_fees_paid,
         locked_amount: position.locked_amount,

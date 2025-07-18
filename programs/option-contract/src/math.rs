@@ -145,6 +145,19 @@ where
     }
 }
 
+pub fn checked_as_i64<T>(arg: T) -> Result<i64>
+where
+    T: Display + num_traits::ToPrimitive + Clone,
+{
+    let option: Option<i64> = num_traits::NumCast::from(arg.clone());
+    if let Some(res) = option {
+        Ok(res)
+    } else {
+        msg!("Error: Overflow in {} as i64", arg);
+        err!(MathError::MathOverflow)
+    }
+}
+
 pub fn checked_powi(arg: f64, exp: i32) -> Result<f64> {
     let res = if exp > 0 {
         f64::powi(arg, exp)

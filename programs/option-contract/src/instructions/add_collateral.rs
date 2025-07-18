@@ -1,5 +1,6 @@
 use crate::{
     errors::{PerpetualError, TradingError},
+    events::CollateralAdded,
     math::{self},
     utils::risk_management::*,
     state::{Contract, Custody, OraclePrice, Pool, Position, PositionType},
@@ -22,6 +23,7 @@ pub fn add_collateral(
     msg!("Adding collateral to perpetual position");
     
     let contract = &ctx.accounts.contract;
+    let pool = &mut ctx.accounts.pool;
     let position = &mut ctx.accounts.position;
     let sol_custody = &mut ctx.accounts.sol_custody;
     let usdc_custody = &mut ctx.accounts.usdc_custody;
@@ -134,6 +136,24 @@ pub fn add_collateral(
     msg!("New leverage: {}x", new_leverage);
     msg!("New liquidation price: {}", position.liquidation_price);
     msg!("New borrow size USD: {}", position.borrow_size_usd);
+    
+    emit!(CollateralAdded {
+        owner: ctx.accounts.owner.key(),
+        position_index: params.position_index,
+        pool: pool.key(),
+        custody: position.custody,
+        collateral_custody: position.collateral_custody,
+        position_type: position.position_type as u8,
+        side: position.side as u8,
+        collateral_amount_added: params.collateral_amount,
+        collateral_usd_added: collateral_usd_to_add,
+        new_collateral_amount: position.collateral_amount,
+        new_collateral_usd: position.collateral_usd,
+        new_leverage,
+        new_liquidation_price: position.liquidation_price,
+        new_borrow_size_usd: position.borrow_size_usd,
+        update_time: current_time,
+    });
     
     Ok(())
 }

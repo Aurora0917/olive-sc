@@ -126,7 +126,6 @@ pub fn cancel_limit_order(
         update_time: position.update_time,
         liquidation_price: position.liquidation_price,
         cumulative_interest_snapshot: position.cumulative_interest_snapshot,
-        cumulative_funding_snapshot: position.cumulative_funding_snapshot,
         opening_fee_paid: position.opening_fee_paid,
         total_fees_paid: position.total_fees_paid,
         locked_amount: position.locked_amount,

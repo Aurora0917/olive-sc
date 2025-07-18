@@ -154,6 +154,16 @@ pub mod option_contract {
         instructions::remove_collateral::remove_collateral(ctx, &params)
     }
 
+    //Update position size
+    pub fn update_position_size(ctx: Context<UpdatePositionSize>, params: UpdatePositionSizeParams) -> Result<()> {
+        instructions::update_position_size::update_position_size(ctx, &params)
+    }
+
+    //Update borrow fees (keeper bot calls this)
+    pub fn update_borrow_fees(ctx: Context<UpdateBorrowFees>, params: UpdateBorrowFeesParams) -> Result<()> {
+        instructions::update_borrow_fees::update_borrow_fees(ctx, &params)
+    }
+
     //Liquidate position
     pub fn liquidate(ctx: Context<Liquidate>, params: LiquidateParams) -> Result<()> {
         instructions::liquidate::liquidate(ctx, &params)
