@@ -125,6 +125,7 @@ pub fn open_perp_position(
     
     let liquidation_price = calculate_liquidation_price(
         entry_price,
+        leverage,
         params.side
     )?;
     
@@ -203,6 +204,7 @@ pub fn open_perp_position(
     }
     
     // Initialize position
+    position.index = user.perp_position_count.checked_add(1).unwrap_or(1);
     position.owner = owner.key();
     position.pool = pool.key();
     position.custody = sol_custody.key(); // Position always tracks SOL
@@ -255,6 +257,7 @@ pub fn open_perp_position(
     user.perp_position_count = user.perp_position_count.checked_add(1).unwrap_or(1);
     
     emit!(PerpPositionOpened {
+        index: position.index,
         owner: position.owner,
         pool: position.pool,
         custody: position.custody,

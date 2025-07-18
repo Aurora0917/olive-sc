@@ -159,6 +159,7 @@ pub struct LimitOptionClosed {
 // Perpetual position events - containing ALL fields from msg! calls
 #[event]
 pub struct PerpPositionOpened {
+    pub index: u64,
     pub owner: Pubkey,
     pub pool: Pubkey,
     pub custody: Pubkey,

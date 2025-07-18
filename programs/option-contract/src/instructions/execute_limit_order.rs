@@ -62,10 +62,13 @@ pub fn execute_limit_order(
         execution_price_scaled <= current_price_scaled.saturating_add(price_tolerance),
         PerpetualError::InvalidExecutionPrice
     );
+
+    let new_leverage = math::checked_div(position.size_usd, position.collateral_usd)?;
     
     // Calculate liquidation price for the new market position
     let liquidation_price = calculate_liquidation_price(
         execution_price_scaled,
+        new_leverage,
         position.side
     )?;
     

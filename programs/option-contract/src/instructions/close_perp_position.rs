@@ -58,6 +58,8 @@ pub fn close_perp_position(
     msg!("USDC Price: {}", usdc_price_value);
     msg!("Closing at SOL price: ${}", current_sol_price);
     msg!("User chose to receive: {}", if params.receive_sol { "SOL" } else { "USDC" });
+    msg!("Position side {:?}",  position.side);
+    msg!("min price {}",  params.min_price);
     
     // Slippage protection
     let current_price_scaled = f64_to_scaled_price(current_sol_price)?;
@@ -148,7 +150,7 @@ pub fn close_perp_position(
     
     // Adjust for token decimals
     let settlement_tokens = math::checked_as_u64(
-        settlement_amount as f64 * math::checked_powi(10.0, settlement_decimals as i32)?
+        settlement_amount as f64 * math::checked_powi(10.0, settlement_decimals as i32)? / 1_000_000.0
     )?;
     
     msg!("Settlement USD: {}", settlement_usd);

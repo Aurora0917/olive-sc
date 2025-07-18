@@ -31,6 +31,7 @@ impl Default for PositionType {
 #[derive(Default, Debug)]
 pub struct Position {
     // Identity & References
+    pub index: u64,
     pub owner: Pubkey,
     pub pool: Pubkey,
     pub custody: Pubkey,                     // Position asset (e.g., SOL)
