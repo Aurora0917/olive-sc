@@ -1,7 +1,7 @@
 use crate::{
     errors::{PerpetualError, TradingError},
     events::PerpTpSlSet,
-    state::{Pool, Position, Side, PositionType},
+    state::{Pool, Position, Side, OrderType},
 };
 use anchor_lang::prelude::*;
 
@@ -24,7 +24,7 @@ pub fn set_tp_sl(
     // Validation
     require_keys_eq!(position.owner, ctx.accounts.owner.key(), TradingError::Unauthorized);
     require!(!position.is_liquidated, PerpetualError::PositionLiquidated);
-    require!(position.position_type == PositionType::Market, PerpetualError::InvalidPositionType);
+    require!(position.order_type == OrderType::Market, PerpetualError::InvalidOrderType);
     
     // Validate TP/SL prices against entry price
     if let Some(tp_price) = params.take_profit_price {
@@ -71,11 +71,13 @@ pub fn set_tp_sl(
     position.update_tp_sl(params.take_profit_price, params.stop_loss_price)?;
     
     emit!(PerpTpSlSet {
+        pub_key: position.key(),
+        index: position.index,
         owner: position.owner,
         pool: position.pool,
         custody: position.custody,
         collateral_custody: position.collateral_custody,
-        position_type: position.position_type as u8,
+        order_type: position.order_type as u8,
         side: position.side as u8,
         is_liquidated: position.is_liquidated,
         price: position.price,

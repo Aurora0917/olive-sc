@@ -3,7 +3,7 @@ use crate::{
     events::PositionSizeUpdated,
     math::{self, f64_to_scaled_price},
     utils::risk_management::*,
-    state::{Contract, Custody, OraclePrice, Pool, Position, Side, PositionType},
+    state::{Contract, Custody, OraclePrice, Pool, Position, Side, OrderType},
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer as SplTransfer};
@@ -35,7 +35,7 @@ pub fn update_position_size(
     // Validation
     require_keys_eq!(position.owner, owner.key(), TradingError::Unauthorized);
     require!(!position.is_liquidated, PerpetualError::PositionLiquidated);
-    require!(position.position_type == PositionType::Market, PerpetualError::InvalidPositionType);
+    require!(position.order_type == OrderType::Market, PerpetualError::InvalidOrderType);
     require!(params.size_delta_usd > 0, TradingError::InvalidAmount);
     
     // Get current prices
@@ -348,7 +348,7 @@ pub fn update_position_size(
         pool: pool.key(),
         custody: position.custody,
         collateral_custody: position.collateral_custody,
-        position_type: position.position_type as u8,
+        order_type: position.order_type as u8,
         side: position.side as u8,
         is_increase: params.is_increase,
         size_delta_usd: params.size_delta_usd,

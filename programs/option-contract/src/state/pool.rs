@@ -26,10 +26,9 @@ pub struct Pool {
     // Borrow/Funding rate curve for dynamic rate calculation
     pub borrow_rate_curve: BorrowRateCurve,
     
-    // Cumulative rates for position tracking
-    pub cumulative_funding_rate_long: i128,
-    pub cumulative_funding_rate_short: i128,
-    pub cumulative_interest_rate: u128,
+    // Cumulative borrow interest rates for position tracking
+    pub cumulative_interest_rate_long: u128,
+    pub cumulative_interest_rate_short: u128,
     pub last_rate_update: i64,
     
     // Open interest tracking for perpetuals
@@ -353,7 +352,7 @@ impl Pool {
         Ok(Fraction::from_bps(utilization_bps.min(10000)))
     }
     
-    // Update borrow rates and cumulative rates using the borrow rate curve
+    // Update borrow interest rates using the borrow rate curve
     pub fn update_rates(&mut self, current_time: i64, custodies: &[Custody]) -> Result<()> {
         if current_time <= self.last_rate_update {
             return Ok(());
@@ -364,35 +363,24 @@ impl Pool {
         // Calculate current utilization
         let utilization = self.calculate_utilization(custodies)?;
         
-        // Get current borrow rate from curve
-        let current_borrow_rate = self.borrow_rate_curve.get_borrow_rate(utilization)?;
+        // Get base borrow rate from curve
+        let base_borrow_rate = self.borrow_rate_curve.get_borrow_rate(utilization)?;
         
-        // Calculate funding rate based on open interest imbalance
+        // Calculate different rates for long/short based on open interest imbalance
         let total_oi = math::checked_add(self.long_open_interest_usd, self.short_open_interest_usd)?;
-        let funding_rate = if total_oi > 0 {
-            let imbalance_ratio = if self.long_open_interest_usd > self.short_open_interest_usd {
-                math::checked_div(
-                    math::checked_sub(self.long_open_interest_usd, self.short_open_interest_usd)?,
-                    total_oi
-                )?
-            } else {
-                math::checked_div(
-                    math::checked_sub(self.short_open_interest_usd, self.long_open_interest_usd)?,
-                    total_oi
-                )?
-            };
-            
-            // Base funding rate with imbalance modifier
-            let base_rate = current_borrow_rate.to_bps().unwrap_or(0u32) as i128;
-            let imbalance_modifier = (imbalance_ratio as i128) / 100; // Scale imbalance
-            
+        let (long_rate_multiplier, short_rate_multiplier) = if total_oi > 0 {
+            // More demand for one side = higher borrow rate for that side
             if self.long_open_interest_usd > self.short_open_interest_usd {
-                base_rate + imbalance_modifier
+                // More longs = longs pay higher borrow rate
+                (120, 100) // Longs pay 20% more, shorts pay base rate
+            } else if self.short_open_interest_usd > self.long_open_interest_usd {
+                // More shorts = shorts pay higher borrow rate  
+                (100, 120) // Longs pay base rate, shorts pay 20% more
             } else {
-                base_rate - imbalance_modifier
+                (100, 100) // Equal = same rates
             }
         } else {
-            0i128
+            (100, 100) // No OI = same rates
         };
         
         // Calculate time-based increments (per hour)
@@ -401,48 +389,55 @@ impl Pool {
             return Ok(());
         }
         
-        // Calculate hourly rate increments
-        let borrow_rate_bps = current_borrow_rate.to_bps().unwrap_or(0u32) as u128;
-        let hourly_borrow_increment = math::checked_div(
-            math::checked_mul(borrow_rate_bps, hours_elapsed)?,
-            8760 // Hours in a year
+        // Calculate base hourly rate increment
+        let base_rate_bps = base_borrow_rate.to_bps().unwrap_or(0u32) as u128;
+        let base_hourly_increment = math::checked_div(
+            math::checked_mul(base_rate_bps, hours_elapsed)?,
+            8760 // Hours in a year (APR to hourly)
         )?;
         
-        let hourly_funding_increment = math::checked_div(
-            math::checked_mul(funding_rate.abs() as u128, hours_elapsed)?,
-            8760 * 3 // Funding paid every 8 hours
-        )? as i128;
-        
-        // Update cumulative rates
-        self.cumulative_interest_rate = math::checked_add(
-            self.cumulative_interest_rate,
-            hourly_borrow_increment
+        // Apply multipliers for long/short rates
+        let long_hourly_increment = math::checked_div(
+            math::checked_mul(base_hourly_increment, long_rate_multiplier)?,
+            100
+        )?;
+        let short_hourly_increment = math::checked_div(
+            math::checked_mul(base_hourly_increment, short_rate_multiplier)?,
+            100
         )?;
         
-        if funding_rate >= 0 {
-            // Longs pay shorts
-            self.cumulative_funding_rate_long = math::checked_sub(
-                self.cumulative_funding_rate_long,
-                hourly_funding_increment
-            )?;
-            self.cumulative_funding_rate_short = math::checked_add(
-                self.cumulative_funding_rate_short,
-                hourly_funding_increment
-            )?;
-        } else {
-            // Shorts pay longs
-            self.cumulative_funding_rate_long = math::checked_add(
-                self.cumulative_funding_rate_long,
-                hourly_funding_increment
-            )?;
-            self.cumulative_funding_rate_short = math::checked_sub(
-                self.cumulative_funding_rate_short,
-                hourly_funding_increment
-            )?;
-        }
+        // Update cumulative interest rates
+        self.cumulative_interest_rate_long = math::checked_add(
+            self.cumulative_interest_rate_long,
+            long_hourly_increment
+        )?;
+        self.cumulative_interest_rate_short = math::checked_add(
+            self.cumulative_interest_rate_short,
+            short_hourly_increment
+        )?;
         
         self.last_rate_update = current_time;
         Ok(())
+    }
+    
+    // Calculate interest payment for a position based on side
+    pub fn get_interest_payment(&self, borrow_amount_usd: u128, position_snapshot: u128, side: crate::state::Side) -> Result<u64> {
+        let current_rate = match side {
+            crate::state::Side::Long => self.cumulative_interest_rate_long,
+            crate::state::Side::Short => self.cumulative_interest_rate_short,
+        };
+        
+        if current_rate <= position_snapshot {
+            return Ok(0);
+        }
+        
+        let rate_delta = math::checked_sub(current_rate, position_snapshot)?;
+        let interest_payment = math::checked_div(
+            math::checked_mul(borrow_amount_usd, rate_delta)?,
+            1_000_000 // Scale down from basis points
+        )?;
+        
+        math::checked_as_u64(interest_payment)
     }
     
     // Get current borrow rate based on utilization
@@ -451,42 +446,7 @@ impl Pool {
         self.borrow_rate_curve.get_borrow_rate(utilization)
     }
     
-    // Get funding payment for a position based on cumulative rates
-    pub fn get_funding_payment(&self, position_side: bool, position_size_usd: u128, cumulative_funding_snapshot: i128) -> Result<i128> {
-        let current_cumulative = if position_side {
-            self.cumulative_funding_rate_long
-        } else {
-            self.cumulative_funding_rate_short
-        };
-        
-        let funding_rate_delta = math::checked_sub(current_cumulative, cumulative_funding_snapshot)?;
-        
-        // Calculate funding payment: position_size * funding_rate_delta / 10000 (bps)
-        let funding_payment = math::checked_div(
-            math::checked_mul(position_size_usd as i128, funding_rate_delta)?,
-            10000
-        )?;
-        
-        Ok(funding_payment)
-    }
-    
-    // Get interest payment for borrowed funds
-    pub fn get_interest_payment(&self, borrow_size_usd: u128, cumulative_interest_snapshot: u128) -> Result<u128> {
-        let interest_rate_delta = math::checked_sub(
-            self.cumulative_interest_rate,
-            cumulative_interest_snapshot
-        )?;
-        
-        // Calculate interest payment: borrow_size * interest_rate_delta / 10000 (bps)
-        let interest_payment = math::checked_div(
-            math::checked_mul(borrow_size_usd, interest_rate_delta)?,
-            10000
-        )?;
-        
-        Ok(interest_payment)
-    }
-    
-    // Get current open interest for funding rate calculation
+    // Get current open interest 
     pub fn get_open_interest_usd(&self) -> Result<(u128, u128)> {
         Ok((self.long_open_interest_usd, self.short_open_interest_usd))
     }

@@ -1,7 +1,7 @@
 use crate::{
     errors::PerpetualError,
     events::BorrowFeesUpdated,
-    state::{Contract, Custody, Pool, Position, PositionType},
+    state::{Contract, Custody, Pool, Position, OrderType},
 };
 use anchor_lang::prelude::*;
 
@@ -25,7 +25,7 @@ pub fn update_borrow_fees(
     
     // Validation
     require!(!position.is_liquidated, PerpetualError::PositionLiquidated);
-    require!(position.position_type == PositionType::Market, PerpetualError::InvalidPositionType);
+    require!(position.order_type == OrderType::Market, PerpetualError::InvalidOrderType);
     
     // Get current time and update pool rates
     let current_time = contract.get_time()?;
@@ -36,18 +36,22 @@ pub fn update_borrow_fees(
     // Store previous snapshot
     let previous_interest_snapshot = position.cumulative_interest_snapshot;
     
-    // Calculate borrow fee payment (on borrowed funds)
+    // Calculate borrow fee payment (on borrowed funds, side-specific)
     let borrow_fee_payment = pool.get_interest_payment(
         position.borrow_size_usd as u128,
-        position.cumulative_interest_snapshot
+        position.cumulative_interest_snapshot,
+        position.side
     )?;
     
     msg!("Position size USD: {}", position.size_usd);
     msg!("Borrow size USD: {}", position.borrow_size_usd);
     msg!("Borrow fee payment: {}", borrow_fee_payment);
     
-    // Get new snapshot
-    let new_interest_snapshot = pool.cumulative_interest_rate;
+    // Get new snapshot (side-specific)
+    let new_interest_snapshot = match position.side {
+        crate::state::Side::Long => pool.cumulative_interest_rate_long,
+        crate::state::Side::Short => pool.cumulative_interest_rate_short,
+    };
     
     // Update position with accrued borrow fees
     position.update_accrued_borrow_fees(
@@ -60,12 +64,13 @@ pub fn update_borrow_fees(
     msg!("New interest snapshot: {}", position.cumulative_interest_snapshot);
     
     emit!(BorrowFeesUpdated {
+        pub_key: position.key(),
         owner: position.owner,
         position_index: params.position_index,
         pool: pool.key(),
         custody: position.custody,
         collateral_custody: position.collateral_custody,
-        position_type: position.position_type as u8,
+        order_type: position.order_type as u8,
         side: position.side as u8,
         position_size_usd: position.size_usd,
         borrow_size_usd: position.borrow_size_usd,

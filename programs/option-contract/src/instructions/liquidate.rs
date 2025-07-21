@@ -2,7 +2,7 @@ use crate::{
     errors::PerpetualError,
     events::PositionLiquidated,
     math::{self, f64_to_scaled_price},
-    state::{Contract, Custody, OraclePrice, Pool, Position, Side, PositionType},
+    state::{Contract, Custody, OraclePrice, Pool, Position, Side, OrderType},
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
@@ -26,9 +26,17 @@ pub fn liquidate(
     let sol_custody = &mut ctx.accounts.sol_custody;
     let usdc_custody = &mut ctx.accounts.usdc_custody;
     
+    // Update pool rates using the borrow rate curve
+    let current_time = Clock::get()?.unix_timestamp;
+    
+    // Get custody accounts for utilization calculation
+    let custodies_slice = [sol_custody.as_ref(), usdc_custody.as_ref()];
+    let custodies_vec: Vec<Custody> = custodies_slice.iter().map(|c| (***c).clone()).collect();
+    pool.update_rates(current_time, &custodies_vec)?;
+    
     // Validation
     require!(!position.is_liquidated, PerpetualError::PositionLiquidated);
-    require!(position.position_type == PositionType::Market, PerpetualError::InvalidPositionType);
+    require!(position.order_type == OrderType::Market, PerpetualError::InvalidOrderType);
     
     // Get current prices from oracles
     let current_time = contract.get_time()?;
@@ -69,11 +77,12 @@ pub fn liquidate(
     let funding_payment = 0i128; // No funding in peer-to-pool model
     let interest_payment = pool.get_interest_payment(
         position.borrow_size_usd as u128,
-        position.cumulative_interest_snapshot
+        position.cumulative_interest_snapshot,
+        position.side
     )?;
     
     // Calculate liquidator reward (0.5% of position size)
-    let liquidator_reward_usd = math::checked_div(position.size_usd, 200)?; // 0.5%
+    let liquidator_reward_usd = 0; // 0.5%
     
     // Calculate net settlement after all deductions
     let mut net_settlement = position.collateral_usd as i64 + pnl - funding_payment as i64 - interest_payment as i64 - liquidator_reward_usd as i64;
@@ -185,11 +194,13 @@ pub fn liquidate(
     position.total_fees_paid = math::checked_add(position.total_fees_paid, liquidator_reward_usd)?;
     
     emit!(PositionLiquidated {
+        pub_key: position.key(),
+        index: position.index,
         owner: position.owner,
         pool: position.pool,
         custody: position.custody,
         collateral_custody: position.collateral_custody,
-        position_type: position.position_type as u8,
+        order_type: position.order_type as u8,
         side: position.side as u8,
         is_liquidated: position.is_liquidated,
         price: position.price,
@@ -200,7 +211,7 @@ pub fn liquidate(
         update_time: position.update_time,
         liquidation_price: position.liquidation_price,
         cumulative_interest_snapshot: position.cumulative_interest_snapshot,
-        opening_fee_paid: position.opening_fee_paid,
+        closing_fee_paid: liquidation_fee,
         total_fees_paid: position.total_fees_paid,
         locked_amount: position.locked_amount,
         collateral_amount: position.collateral_amount,
@@ -210,6 +221,7 @@ pub fn liquidate(
         trigger_above_threshold: position.trigger_above_threshold,
         bump: position.bump,
         settlement_tokens,
+        pnl: pnl,
         liquidator_reward_tokens,
         liquidator: ctx.accounts.liquidator.key(),
     });

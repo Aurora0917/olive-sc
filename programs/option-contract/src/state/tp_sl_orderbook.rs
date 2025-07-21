@@ -14,7 +14,7 @@ pub struct TpSlOrderbook {
     // Identity
     pub owner: Pubkey,              // Position owner
     pub position: Pubkey,           // Associated position account
-    pub position_type: u8,          // 0 = Perp, 1 = Option
+    pub contract_type: u8,          // 0 = Perp, 1 = Option
     
     // Orders (max 10 each)
     pub take_profit_orders: [TpSlOrder; 10],
@@ -42,12 +42,12 @@ impl TpSlOrderbook {
         &mut self,
         owner: Pubkey,
         position: Pubkey,
-        position_type: u8,
+        contract_type: u8,
         bump: u8,
     ) -> Result<()> {
         self.owner = owner;
         self.position = position;
-        self.position_type = position_type;
+        self.contract_type = contract_type;
         self.bump = bump;
         self.active_tp_count = 0;
         self.active_sl_count = 0;

@@ -2,8 +2,8 @@ use crate::{
     errors::{PerpetualError, TradingError},
     events::LimitOrderExecuted,
     math::{self, f64_to_scaled_price},
+    state::{Contract, Custody, OraclePrice, OrderType, Pool, Position, Side},
     utils::risk_management::*,
-    state::{Contract, Custody, OraclePrice, Pool, Position, PositionType, Side, User},
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token};
@@ -12,105 +12,135 @@ use anchor_spl::token::{Mint, Token};
 pub struct ExecuteLimitOrderParams {
     pub position_index: u64,
     pub pool_name: String,
-    pub execution_price: f64,  // Actual execution price
+    pub execution_price: f64, // Actual execution price
 }
 
 pub fn execute_limit_order(
     ctx: Context<ExecuteLimitOrder>,
-    params: &ExecuteLimitOrderParams
+    params: &ExecuteLimitOrderParams,
 ) -> Result<()> {
     msg!("Executing limit order");
-    
+
     let contract = &ctx.accounts.contract;
     let position = &mut ctx.accounts.position;
     let pool = &mut ctx.accounts.pool;
-    let _sol_custody = &mut ctx.accounts.sol_custody;
-    let _usdc_custody = &mut ctx.accounts.usdc_custody;
-    
+    let sol_custody = &mut ctx.accounts.sol_custody;
+    let usdc_custody = &mut ctx.accounts.usdc_custody;
+
     // Validation
-    require_keys_eq!(position.owner, ctx.accounts.owner.key(), TradingError::Unauthorized);
+    // require_keys_eq!(position.owner, ctx.accounts.owner.key(), TradingError::Unauthorized);
     require!(!position.is_liquidated, PerpetualError::PositionLiquidated);
-    require!(position.position_type == PositionType::Limit, PerpetualError::NotLimitOrder);
+    require!(
+        position.order_type == OrderType::Limit,
+        PerpetualError::NotLimitOrder
+    );
     require!(params.execution_price > 0.0, TradingError::InvalidPrice);
-    
+
     // Get current time and prices
     let current_time = contract.get_time()?;
-    let sol_price = OraclePrice::new_from_oracle(&ctx.accounts.sol_oracle_account, current_time, false)?;
-    let usdc_price = OraclePrice::new_from_oracle(&ctx.accounts.usdc_oracle_account, current_time, false)?;
-    
+    let sol_price =
+        OraclePrice::new_from_oracle(&ctx.accounts.sol_oracle_account, current_time, false)?;
+    let usdc_price =
+        OraclePrice::new_from_oracle(&ctx.accounts.usdc_oracle_account, current_time, false)?;
+
     let current_sol_price = sol_price.get_price();
     let _usdc_price_value = usdc_price.get_price();
     let execution_price_scaled = f64_to_scaled_price(params.execution_price)?;
-    
+
     msg!("Current SOL price: {}", current_sol_price);
     msg!("Execution price: {}", params.execution_price);
     msg!("Position side: {:?}", position.side);
     msg!("Position trigger price: {:?}", position.trigger_price);
-    
+
     // Validate that the limit order should be executed at this price
     require!(
         position.should_execute_limit_order(execution_price_scaled),
         PerpetualError::LimitOrderNotTriggered
     );
-    
+
     // Additional validation: ensure execution price is reasonable based on current market price
     let current_price_scaled = f64_to_scaled_price(current_sol_price)?;
     let price_tolerance = math::checked_div(current_price_scaled, 100)?; // 1% tolerance
-    
+
     require!(
-        execution_price_scaled >= current_price_scaled.saturating_sub(price_tolerance) &&
-        execution_price_scaled <= current_price_scaled.saturating_add(price_tolerance),
+        execution_price_scaled >= current_price_scaled.saturating_sub(price_tolerance)
+            && execution_price_scaled <= current_price_scaled.saturating_add(price_tolerance),
         PerpetualError::InvalidExecutionPrice
     );
 
-    let new_leverage = math::checked_div(position.size_usd, position.collateral_usd)?;
-    
-    // Calculate liquidation price for the new market position
-    let liquidation_price = calculate_liquidation_price(
-        execution_price_scaled,
-        new_leverage,
-        position.side
-    )?;
-    
-    // Get current cumulative funding and interest snapshots from pool
-    // These will be set when the position becomes a market position
-    let _current_cumulative_funding = if position.side == Side::Long {
-        pool.cumulative_funding_rate_long
+    if position.side == Side::Long {
+        // Convert 6-decimal USD back to actual USD, then to SOL tokens
+        position.size_usd = math::checked_as_u64(
+            math::checked_div(position.locked_amount, 1_000_000_000)? * current_price_scaled,
+        )?;
+        position.collateral_usd = math::checked_as_u64(
+            math::checked_div(position.collateral_amount, 1_000_000_000)? * current_price_scaled,
+        )?;
     } else {
-        pool.cumulative_funding_rate_short
+        // Convert 6-decimal USD to USDC tokens
+        position.size_usd = math::checked_as_u64(
+            math::checked_div(position.locked_amount, 1_000_000)?
+                * f64_to_scaled_price(_usdc_price_value)?,
+        )?;
+        position.collateral_usd = math::checked_as_u64(
+            math::checked_div(position.collateral_amount, 1_000_000)?
+                * f64_to_scaled_price(_usdc_price_value)?,
+        )?;
     };
-    let current_cumulative_interest = pool.cumulative_interest_rate;
-    
+
+    position.price = current_price_scaled;
+    position.order_type = OrderType::Market;
+
+    let new_leverage = math::checked_div(position.size_usd, position.collateral_usd)?;
+
+    // Calculate liquidation price for the new market position
+    let liquidation_price =
+        calculate_liquidation_price(current_price_scaled, new_leverage, position.side)?;
+
+    // Get current cumulative interest snapshot from pool (side-specific)
+    // This will be set when the position becomes a market position
+    let current_cumulative_interest = match position.side {
+        Side::Long => pool.cumulative_interest_rate_long,
+        Side::Short => pool.cumulative_interest_rate_short,
+    };
+
     // Execute the limit order (convert to market position)
-    position.execute_limit_order(execution_price_scaled, current_time)?;
-    
+    position.execute_limit_order(current_price_scaled, current_time)?;
+
+    if position.side == Side::Long {
+        // Long positions always need SOL backing
+        sol_custody.token_locked = math::checked_add(sol_custody.token_locked, position.locked_amount)?;
+    } else {
+        // Short positions always need USDC backing
+        usdc_custody.token_locked =
+            math::checked_add(usdc_custody.token_locked, position.locked_amount)?;
+    }
+
     // Update position with market position specifics
     position.liquidation_price = liquidation_price;
-    
+
     // Set funding and interest snapshots to current values (start tracking from execution)
     // Limit orders don't pay funding/interest until they become market positions
     // No funding snapshot update needed in peer-to-pool model;
     position.cumulative_interest_snapshot = current_cumulative_interest;
-    
+
     // Update pool open interest tracking
     if position.side == Side::Long {
-        pool.long_open_interest_usd = math::checked_add(
-            pool.long_open_interest_usd,
-            position.size_usd as u128
-        )?;
+        pool.long_open_interest_usd =
+            math::checked_add(pool.long_open_interest_usd, position.size_usd as u128)?;
     } else {
-        pool.short_open_interest_usd = math::checked_add(
-            pool.short_open_interest_usd,
-            position.size_usd as u128
-        )?;
+        pool.short_open_interest_usd =
+            math::checked_add(pool.short_open_interest_usd, position.size_usd as u128)?;
     }
-    
+
     emit!(LimitOrderExecuted {
+        pub_key: position.key(),
+        index: position.index,
         owner: position.owner,
         pool: position.pool,
         custody: position.custody,
         collateral_custody: position.collateral_custody,
-        position_type: position.position_type as u8,
+        order_type: position.order_type as u8,
         side: position.side as u8,
         is_liquidated: position.is_liquidated,
         price: position.price,
@@ -132,7 +162,7 @@ pub fn execute_limit_order(
         bump: position.bump,
         execution_price: execution_price_scaled,
     });
-    
+
     Ok(())
 }
 
@@ -140,7 +170,7 @@ pub fn execute_limit_order(
 #[instruction(params: ExecuteLimitOrderParams)]
 pub struct ExecuteLimitOrder<'info> {
     #[account(mut)]
-    pub owner: Signer<'info>,
+    pub executor: Signer<'info>,
 
     #[account(
         seeds = [b"contract"],
@@ -157,16 +187,9 @@ pub struct ExecuteLimitOrder<'info> {
 
     #[account(
         mut,
-        seeds = [b"user", owner.key().as_ref()],
-        bump = user.bump
-    )]
-    pub user: Box<Account<'info, User>>,
-
-    #[account(
-        mut,
         seeds = [
             b"position",
-            owner.key().as_ref(),
+            position.owner.as_ref(),
             params.position_index.to_le_bytes().as_ref(),
             pool.key().as_ref()
         ],

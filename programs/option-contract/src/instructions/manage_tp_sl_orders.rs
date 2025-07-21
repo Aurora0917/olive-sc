@@ -19,7 +19,7 @@ pub enum OrderAction {
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct ManageTpSlOrdersParams {
-    pub position_type: u8,
+    pub contract_type: u8,
     pub position_index: u64,
     pub pool_name: String,
     pub action: OrderAction,
@@ -36,10 +36,10 @@ pub fn manage_tp_sl_orders(
     
     // Validation
     require_keys_eq!(orderbook.owner, owner, TradingError::Unauthorized);
-    require_eq!(orderbook.position_type, params.position_type, TradingError::InvalidPositionType);
+    require_eq!(orderbook.contract_type, params.contract_type, TradingError::InvalidOrderType);
     
     // Additional validation based on position type
-    match params.position_type {
+    match params.contract_type {
         0 => {
             // Perp position validation
             let position = ctx.accounts.position.as_ref().unwrap();
@@ -104,7 +104,7 @@ pub fn manage_tp_sl_orders(
                 _ => {}
             }
         },
-        _ => return Err(TradingError::InvalidPositionType.into()),
+        _ => return Err(TradingError::InvalidOrderType.into()),
     }
     
     // Execute action
@@ -114,8 +114,8 @@ pub fn manage_tp_sl_orders(
             emit!(TpSlOrderAdded {
                 owner,
                 position: orderbook.position,
-                position_type: orderbook.position_type,
-                order_type: 0, // 0 = TP
+                contract_type: orderbook.contract_type,
+                trigger_order_type: 0, // 0 = TP
                 index: index as u8,
                 price,
                 size_percent,
@@ -126,8 +126,8 @@ pub fn manage_tp_sl_orders(
             emit!(TpSlOrderAdded {
                 owner,
                 position: orderbook.position,
-                position_type: orderbook.position_type,
-                order_type: 1, // 1 = SL
+                contract_type: orderbook.contract_type,
+                trigger_order_type: 1, // 1 = SL
                 index: index as u8,
                 price,
                 size_percent,
@@ -138,8 +138,8 @@ pub fn manage_tp_sl_orders(
             emit!(TpSlOrderUpdated {
                 owner,
                 position: orderbook.position,
-                position_type: orderbook.position_type,
-                order_type: 0, // 0 = TP
+                contract_type: orderbook.contract_type,
+                trigger_order_type: 0, // 0 = TP
                 index,
                 new_price,
                 new_size_percent,
@@ -150,8 +150,8 @@ pub fn manage_tp_sl_orders(
             emit!(TpSlOrderUpdated {
                 owner,
                 position: orderbook.position,
-                position_type: orderbook.position_type,
-                order_type: 1, // 1 = SL
+                contract_type: orderbook.contract_type,
+                trigger_order_type: 1, // 1 = SL
                 index,
                 new_price,
                 new_size_percent,
@@ -162,8 +162,8 @@ pub fn manage_tp_sl_orders(
             emit!(TpSlOrderRemoved {
                 owner,
                 position: orderbook.position,
-                position_type: orderbook.position_type,
-                order_type: 0, // 0 = TP
+                contract_type: orderbook.contract_type,
+                trigger_order_type: 0, // 0 = TP
                 index,
             });
         },
@@ -172,8 +172,8 @@ pub fn manage_tp_sl_orders(
             emit!(TpSlOrderRemoved {
                 owner,
                 position: orderbook.position,
-                position_type: orderbook.position_type,
-                order_type: 1, // 1 = SL
+                contract_type: orderbook.contract_type,
+                trigger_order_type: 1, // 1 = SL
                 index,
             });
         },
@@ -199,7 +199,7 @@ pub struct ManageTpSlOrders<'info> {
             owner.key().as_ref(),
             params.position_index.to_le_bytes().as_ref(),
             params.pool_name.as_bytes(),
-            params.position_type.to_le_bytes().as_ref(),
+            params.contract_type.to_le_bytes().as_ref(),
         ],
         bump = tp_sl_orderbook.bump
     )]
@@ -211,9 +211,9 @@ pub struct ManageTpSlOrders<'info> {
     )]
     pub pool: Box<Account<'info, Pool>>,
     
-    // Position account (for perps - only present when position_type = 0)
+    // Position account (for perps - only present when contract_type = 0)
     pub position: Option<Box<Account<'info, Position>>>,
     
-    // Option account (for options - only present when position_type = 1)
+    // Option account (for options - only present when contract_type = 1)
     pub option_detail: Option<Box<Account<'info, OptionDetail>>>,
 }

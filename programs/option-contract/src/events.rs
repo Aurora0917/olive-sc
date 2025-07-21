@@ -160,11 +160,12 @@ pub struct LimitOptionClosed {
 #[event]
 pub struct PerpPositionOpened {
     pub index: u64,
+    pub pub_key: Pubkey,
     pub owner: Pubkey,
     pub pool: Pubkey,
     pub custody: Pubkey,
     pub collateral_custody: Pubkey,
-    pub position_type: u8,
+    pub order_type: u8,
     pub side: u8,
     pub is_liquidated: bool,
     pub price: u64,
@@ -172,6 +173,7 @@ pub struct PerpPositionOpened {
     pub borrow_size_usd: u64,
     pub collateral_usd: u64,
     pub open_time: i64,
+    pub execution_time: Option<i64>,
     pub update_time: i64,
     pub liquidation_price: u64,
     pub cumulative_interest_snapshot: u128,
@@ -188,11 +190,13 @@ pub struct PerpPositionOpened {
 
 #[event]
 pub struct PerpPositionClosed {
+    pub index: u64,
+    pub pub_key: Pubkey,
     pub owner: Pubkey,
     pub pool: Pubkey,
     pub custody: Pubkey,
     pub collateral_custody: Pubkey,
-    pub position_type: u8,
+    pub order_type: u8,
     pub side: u8,
     pub is_liquidated: bool,
     pub price: u64,
@@ -203,7 +207,7 @@ pub struct PerpPositionClosed {
     pub update_time: i64,
     pub liquidation_price: u64,
     pub cumulative_interest_snapshot: u128,
-    pub opening_fee_paid: u64,
+    pub closing_fee_paid: u64,
     pub total_fees_paid: u64,
     pub locked_amount: u64,
     pub collateral_amount: u64,
@@ -213,16 +217,20 @@ pub struct PerpPositionClosed {
     pub trigger_above_threshold: bool,
     pub bump: u8,
     pub close_percentage: u64,
+    pub realized_pnl: i64,
+    pub unrealized_pnl: i64,
     pub settlement_tokens: u64,
 }
 
 #[event]
 pub struct PerpTpSlSet {
+    pub index: u64,
+    pub pub_key: Pubkey,
     pub owner: Pubkey,
     pub pool: Pubkey,
     pub custody: Pubkey,
     pub collateral_custody: Pubkey,
-    pub position_type: u8,
+    pub order_type: u8,
     pub side: u8,
     pub is_liquidated: bool,
     pub price: u64,
@@ -247,11 +255,13 @@ pub struct PerpTpSlSet {
 // Limit order events - containing ALL fields from msg! calls
 #[event]
 pub struct LimitOrderExecuted {
+    pub index: u64,
+    pub pub_key: Pubkey,
     pub owner: Pubkey,
     pub pool: Pubkey,
     pub custody: Pubkey,
     pub collateral_custody: Pubkey,
-    pub position_type: u8,
+    pub order_type: u8,
     pub side: u8,
     pub is_liquidated: bool,
     pub price: u64,
@@ -276,11 +286,13 @@ pub struct LimitOrderExecuted {
 
 #[event]
 pub struct LimitOrderCanceled {
+    pub index: u64,
+    pub pub_key: Pubkey,
     pub owner: Pubkey,
     pub pool: Pubkey,
     pub custody: Pubkey,
     pub collateral_custody: Pubkey,
-    pub position_type: u8,
+    pub order_type: u8,
     pub side: u8,
     pub is_liquidated: bool,
     pub price: u64,
@@ -300,6 +312,7 @@ pub struct LimitOrderCanceled {
     pub trigger_price: Option<u64>,
     pub trigger_above_threshold: bool,
     pub bump: u8,
+    pub close_percentage: u64,
     pub refunded_collateral: u64,
     pub refunded_collateral_usd: u64,
 }
@@ -307,11 +320,13 @@ pub struct LimitOrderCanceled {
 // Liquidation events - containing ALL fields from msg! calls
 #[event]
 pub struct PositionLiquidated {
+    pub index: u64,
+    pub pub_key: Pubkey,
     pub owner: Pubkey,
     pub pool: Pubkey,
     pub custody: Pubkey,
     pub collateral_custody: Pubkey,
-    pub position_type: u8,
+    pub order_type: u8,
     pub side: u8,
     pub is_liquidated: bool,
     pub price: u64,
@@ -322,7 +337,7 @@ pub struct PositionLiquidated {
     pub update_time: i64,
     pub liquidation_price: u64,
     pub cumulative_interest_snapshot: u128,
-    pub opening_fee_paid: u64,
+    pub closing_fee_paid: u64,
     pub total_fees_paid: u64,
     pub locked_amount: u64,
     pub collateral_amount: u64,
@@ -330,6 +345,7 @@ pub struct PositionLiquidated {
     pub stop_loss_price: Option<u64>,
     pub trigger_price: Option<u64>,
     pub trigger_above_threshold: bool,
+    pub pnl: i64,
     pub bump: u8,
     pub settlement_tokens: u64,
     pub liquidator_reward_tokens: u64,
@@ -370,9 +386,8 @@ pub struct PoolAdded {
     pub lp_token_mint: Pubkey,
     pub bump: u8,
     pub lp_token_bump: u8,
-    pub cumulative_funding_rate_long: i128,
-    pub cumulative_funding_rate_short: i128,
-    pub cumulative_interest_rate: u128,
+    pub cumulative_interest_rate_long: u128,
+    pub cumulative_interest_rate_short: u128,
     pub long_open_interest_usd: u128,
     pub short_open_interest_usd: u128,
     pub total_borrowed_usd: u128,
@@ -383,7 +398,7 @@ pub struct PoolAdded {
 pub struct TpSlOrderbookInitialized {
     pub owner: Pubkey,
     pub position: Pubkey,
-    pub position_type: u8,
+    pub contract_type: u8,
     pub bump: u8,
 }
 
@@ -391,8 +406,8 @@ pub struct TpSlOrderbookInitialized {
 pub struct TpSlOrderAdded {
     pub owner: Pubkey,
     pub position: Pubkey,
-    pub position_type: u8,
-    pub order_type: u8, // 0 = TP, 1 = SL
+    pub contract_type: u8,
+    pub trigger_order_type: u8, // 0 = TP, 1 = SL
     pub index: u8,
     pub price: u64,
     pub size_percent: u16,
@@ -402,8 +417,8 @@ pub struct TpSlOrderAdded {
 pub struct TpSlOrderUpdated {
     pub owner: Pubkey,
     pub position: Pubkey,
-    pub position_type: u8,
-    pub order_type: u8, // 0 = TP, 1 = SL
+    pub contract_type: u8,
+    pub trigger_order_type: u8, // 0 = TP, 1 = SL
     pub index: u8,
     pub new_price: Option<u64>,
     pub new_size_percent: Option<u16>,
@@ -413,8 +428,8 @@ pub struct TpSlOrderUpdated {
 pub struct TpSlOrderRemoved {
     pub owner: Pubkey,
     pub position: Pubkey,
-    pub position_type: u8,
-    pub order_type: u8, // 0 = TP, 1 = SL
+    pub contract_type: u8,
+    pub trigger_order_type: u8, // 0 = TP, 1 = SL
     pub index: u8,
 }
 
@@ -422,8 +437,8 @@ pub struct TpSlOrderRemoved {
 pub struct TpSlOrderExecuted {
     pub owner: Pubkey,
     pub position: Pubkey,
-    pub position_type: u8,
-    pub order_type: u8, // 0 = TP, 1 = SL
+    pub contract_type: u8,
+    pub trigger_order_type: u8, // 0 = TP, 1 = SL
     pub index: u8,
     pub price: u64,
     pub size_percent: u16,
@@ -433,12 +448,13 @@ pub struct TpSlOrderExecuted {
 // Collateral management events
 #[event]
 pub struct CollateralAdded {
+    pub pub_key: Pubkey,
     pub owner: Pubkey,
     pub position_index: u64,
     pub pool: Pubkey,
     pub custody: Pubkey,
     pub collateral_custody: Pubkey,
-    pub position_type: u8,
+    pub order_type: u8,
     pub side: u8,
     pub collateral_amount_added: u64,
     pub collateral_usd_added: u64,
@@ -452,12 +468,13 @@ pub struct CollateralAdded {
 
 #[event]
 pub struct CollateralRemoved {
+    pub pub_key: Pubkey,
     pub owner: Pubkey,
     pub position_index: u64,
     pub pool: Pubkey,
     pub custody: Pubkey,
     pub collateral_custody: Pubkey,
-    pub position_type: u8,
+    pub order_type: u8,
     pub side: u8,
     pub collateral_amount_removed: u64,
     pub collateral_usd_removed: u64,
@@ -478,7 +495,7 @@ pub struct PositionSizeUpdated {
     pub pool: Pubkey,
     pub custody: Pubkey,
     pub collateral_custody: Pubkey,
-    pub position_type: u8,
+    pub order_type: u8,
     pub side: u8,
     pub is_increase: bool,
     pub size_delta_usd: u64,
@@ -497,12 +514,13 @@ pub struct PositionSizeUpdated {
 
 #[event]
 pub struct BorrowFeesUpdated {
+    pub pub_key: Pubkey,
     pub owner: Pubkey,
     pub position_index: u64,
     pub pool: Pubkey,
     pub custody: Pubkey,
     pub collateral_custody: Pubkey,
-    pub position_type: u8,
+    pub order_type: u8,
     pub side: u8,
     pub position_size_usd: u64,
     pub borrow_size_usd: u64,

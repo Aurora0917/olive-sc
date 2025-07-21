@@ -59,7 +59,7 @@ pub enum PerpetualError {
     #[msg("Insufficient collateral to pay funding fees")]
     InsufficientCollateralForFunding,
     #[msg("Invalid position type")]
-    InvalidPositionType,
+    InvalidOrderType,
     #[msg("Position is not a limit order")]
     NotLimitOrder,
     #[msg("Position is not a market order")]
@@ -128,7 +128,7 @@ pub enum TradingError {
     #[msg("Invalid amount specified")]
     InvalidAmount,
     #[msg("Invalid position type")]
-    InvalidPositionType,
+    InvalidOrderType,
     #[msg("Invalid slippage tolerance")]
     InvalidSlippage,
     #[msg("Price slippage exceeded limits")]

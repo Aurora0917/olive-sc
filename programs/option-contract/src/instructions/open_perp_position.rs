@@ -3,7 +3,7 @@ use crate::{
     events::PerpPositionOpened,
     math::{self, f64_to_scaled_price},
     utils::risk_management::*,
-    state::{Contract, Custody, OraclePrice, Pool, User, Position, Side, PositionType},
+    state::{Contract, Custody, OraclePrice, Pool, User, Position, Side, OrderType},
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer as SplTransfer};
@@ -13,7 +13,7 @@ pub struct OpenPerpPositionParams {
     pub size_amount: u64,              // Position amount in tokens
     pub collateral_amount: u64,     // Collateral amount in tokens
     pub side: Side,                 // Long or Short
-    pub position_type: PositionType, // Market or Limit
+    pub order_type: OrderType, // Market or Limit
     pub trigger_price: Option<u64>, // For limit orders
     pub trigger_above_threshold: bool, // Direction for limit orders
     pub max_slippage: u64,          // Max acceptable slippage in basis points
@@ -117,7 +117,7 @@ pub fn open_perp_position(
     );
     
     // Calculate liquidation price
-    let entry_price = if params.position_type == PositionType::Limit {
+    let entry_price = if params.order_type == OrderType::Limit {
         params.trigger_price.unwrap_or(f64_to_scaled_price(sol_price_value)?)
     } else {
         f64_to_scaled_price(sol_price_value)?
@@ -144,7 +144,6 @@ pub fn open_perp_position(
         let usdc_tokens_needed = usd_amount / usdc_price_value;
         math::checked_as_u64(usdc_tokens_needed * math::checked_powi(10.0, usdc_custody.decimals as i32)?)?
     };
-    
     if params.side == Side::Long {
         require_gte!(
             sol_custody.token_owned,
@@ -177,18 +176,20 @@ pub fn open_perp_position(
     )?;
     
     // Update custody stats
-    if params.side == Side::Long {
-        // Long positions always need SOL backing
-        sol_custody.token_locked = math::checked_add(
-            sol_custody.token_locked,
-            required_liquidity
-        )?;
-    } else {
-        // Short positions always need USDC backing  
-        usdc_custody.token_locked = math::checked_add(
-            usdc_custody.token_locked,
-            required_liquidity
-        )?;
+    if params.order_type == OrderType::Market {
+        if params.side == Side::Long {
+            // Long positions always need SOL backing
+            sol_custody.token_locked = math::checked_add(
+                sol_custody.token_locked,
+                required_liquidity
+            )?;
+        } else {
+            // Short positions always need USDC backing  
+            usdc_custody.token_locked = math::checked_add(
+                usdc_custody.token_locked,
+                required_liquidity
+            )?;
+        }
     }
 
     if params.pay_sol {
@@ -209,7 +210,7 @@ pub fn open_perp_position(
     position.pool = pool.key();
     position.custody = sol_custody.key(); // Position always tracks SOL
     position.collateral_custody = collateral_custody;
-    position.position_type = params.position_type;
+    position.order_type = params.order_type;
     position.side = params.side;
     position.is_liquidated = false;
     position.price = entry_price;
@@ -218,15 +219,18 @@ pub fn open_perp_position(
     position.collateral_usd = collateral_usd;
     position.open_time = current_time;
     position.update_time = current_time;
-    position.execution_time = if params.position_type == PositionType::Market {
+    position.execution_time = if params.order_type == OrderType::Market {
         Some(current_time)  // Market orders execute immediately
     } else {
         None  // Limit orders start with no execution time
     };
     position.liquidation_price = liquidation_price;
     
-    // Set snapshots from current pool state
-    position.cumulative_interest_snapshot = pool.cumulative_interest_rate;
+    // Set snapshots from current pool state (side-specific)
+    position.cumulative_interest_snapshot = match params.side {
+        Side::Long => pool.cumulative_interest_rate_long,
+        Side::Short => pool.cumulative_interest_rate_short,
+    };
 
     position.opening_fee_paid = 0;    
     position.total_fees_paid = 0;
@@ -260,9 +264,10 @@ pub fn open_perp_position(
         index: position.index,
         owner: position.owner,
         pool: position.pool,
+        pub_key: position.key(),
         custody: position.custody,
         collateral_custody: position.collateral_custody,
-        position_type: position.position_type as u8,
+        order_type: position.order_type as u8,
         side: position.side as u8,
         is_liquidated: position.is_liquidated,
         price: position.price,
@@ -270,6 +275,7 @@ pub fn open_perp_position(
         borrow_size_usd: position.borrow_size_usd,
         collateral_usd: position.collateral_usd,
         open_time: position.open_time,
+        execution_time: position.execution_time,
         update_time: position.update_time,
         liquidation_price: position.liquidation_price,
         cumulative_interest_snapshot: position.cumulative_interest_snapshot,

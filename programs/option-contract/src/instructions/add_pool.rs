@@ -47,10 +47,9 @@ pub fn add_pool<'info>(ctx: Context<'_, '_, '_, 'info, AddPool<'info>>, params: 
     // Initialize borrow rate curve with default parameters
     pool.initialize_borrow_rate_curve()?;
     
-    // Initialize rate tracking fields
-    pool.cumulative_funding_rate_long = 0;
-    pool.cumulative_funding_rate_short = 0;
-    pool.cumulative_interest_rate = 0;
+    // Initialize borrow interest rate tracking fields
+    pool.cumulative_interest_rate_long = 0;
+    pool.cumulative_interest_rate_short = 0;
     pool.last_rate_update = Clock::get()?.unix_timestamp;
     
     // Initialize open interest tracking
@@ -67,9 +66,8 @@ pub fn add_pool<'info>(ctx: Context<'_, '_, '_, 'info, AddPool<'info>>, params: 
         lp_token_mint: ctx.accounts.lp_token_mint.key(),
         bump: pool.bump,
         lp_token_bump: pool.lp_token_bump,
-        cumulative_funding_rate_long: pool.cumulative_funding_rate_long,
-        cumulative_funding_rate_short: pool.cumulative_funding_rate_short,
-        cumulative_interest_rate: pool.cumulative_interest_rate,
+        cumulative_interest_rate_long: pool.cumulative_interest_rate_long,
+        cumulative_interest_rate_short: pool.cumulative_interest_rate_short,
         long_open_interest_usd: pool.long_open_interest_usd,
         short_open_interest_usd: pool.short_open_interest_usd,
         total_borrowed_usd: pool.total_borrowed_usd,

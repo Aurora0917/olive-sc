@@ -3,7 +3,7 @@ use crate::{
     events::CollateralAdded,
     math::{self},
     utils::risk_management::*,
-    state::{Contract, Custody, OraclePrice, Pool, Position, PositionType},
+    state::{Contract, Custody, OraclePrice, Pool, Position, OrderType},
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer as SplTransfer};
@@ -31,7 +31,7 @@ pub fn add_collateral(
     // Validation
     require_keys_eq!(position.owner, ctx.accounts.owner.key(), TradingError::Unauthorized);
     require!(!position.is_liquidated, PerpetualError::PositionLiquidated);
-    require!(position.position_type == PositionType::Market, PerpetualError::InvalidPositionType);
+    require!(position.order_type == OrderType::Market, PerpetualError::InvalidOrderType);
     require!(params.collateral_amount > 0, TradingError::InvalidAmount);
     
     // Check user has sufficient balance
@@ -164,12 +164,13 @@ pub fn add_collateral(
     msg!("New borrow size USD: {}", position.borrow_size_usd);
     
     emit!(CollateralAdded {
+        pub_key: position.key(),
         owner: ctx.accounts.owner.key(),
         position_index: params.position_index,
         pool: pool.key(),
         custody: position.custody,
         collateral_custody: position.collateral_custody,
-        position_type: position.position_type as u8,
+        order_type: position.order_type as u8,
         side: position.side as u8,
         collateral_amount_added: params.collateral_amount,
         collateral_usd_added: collateral_usd_to_add,

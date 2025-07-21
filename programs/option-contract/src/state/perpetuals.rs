@@ -16,12 +16,12 @@ impl Default for Side {
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Debug)]
-pub enum PositionType {
+pub enum OrderType {
     Market,     // Market position (immediate execution)
     Limit,      // Limit order (pending execution)
 }
 
-impl Default for PositionType {
+impl Default for OrderType {
     fn default() -> Self {
         Self::Market
     }
@@ -38,7 +38,7 @@ pub struct Position {
     pub collateral_custody: Pubkey,          // Collateral asset (e.g., USDC)
     
     // Position Type & Status
-    pub position_type: PositionType,         // Market or Limit
+    pub order_type: OrderType,         // Market or Limit
     pub side: Side,
     pub is_liquidated: bool,
     
@@ -54,8 +54,8 @@ pub struct Position {
     // Risk Management (Set at open, used for liquidation)
     pub liquidation_price: u64,              // Pre-calculated for efficiency
     
-    // Borrow Fee Tracking
-    pub cumulative_interest_snapshot: u128,  // Pool's cumulative borrow rate at position open
+    // Borrow Fee Tracking (side-specific)
+    pub cumulative_interest_snapshot: u128,  // Pool's cumulative borrow rate at position open (side-specific)
     
     // Accrued Amounts (settled on close)
     pub accrued_borrow_fees: u64,           // Accrued borrow fees (always positive, always paid by position)
@@ -147,7 +147,7 @@ impl Position {
     }
 
     pub fn should_execute_limit_order(&self, current_price: u64) -> bool {
-        if self.position_type != PositionType::Limit {
+        if self.order_type != OrderType::Limit {
             return false;
         }
         
@@ -163,7 +163,7 @@ impl Position {
     }
     
     pub fn execute_limit_order(&mut self, execution_price: u64, current_time: i64) -> Result<()> {
-        self.position_type = PositionType::Market;
+        self.order_type = OrderType::Market;
         self.price = execution_price;
         self.trigger_price = None;
         self.execution_time = Some(current_time);  // Track when limit order was executed
@@ -178,24 +178,24 @@ impl Position {
             execution_time != self.open_time
         } else {
             // If execution_time is None, it's still a pending limit order
-            self.position_type == PositionType::Limit
+            self.order_type == OrderType::Limit
         }
     }
     
     /// Check if this is a pending limit order
     pub fn is_pending_limit_order(&self) -> bool {
-        self.position_type == PositionType::Limit && self.execution_time.is_none()
+        self.order_type == OrderType::Limit && self.execution_time.is_none()
     }
     
     /// Check if this is an executed limit order (now market position)
     pub fn is_executed_limit_order(&self) -> bool {
-        self.position_type == PositionType::Market && 
+        self.order_type == OrderType::Market && 
         self.execution_time.is_some() && 
         self.execution_time.unwrap() != self.open_time
     }
 
     pub fn is_liquidatable(&self, current_price: u64) -> bool {
-        if self.position_type == PositionType::Limit {
+        if self.order_type == OrderType::Limit {
             return false; // Can't liquidate limit orders
         }
         
@@ -206,7 +206,7 @@ impl Position {
     }
     
     pub fn is_liquidatable_by_margin(&self, current_price: u64) -> Result<bool> {
-        if self.position_type == PositionType::Limit {
+        if self.order_type == OrderType::Limit {
             return Ok(false);
         }
         

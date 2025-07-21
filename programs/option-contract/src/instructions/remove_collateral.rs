@@ -3,7 +3,7 @@ use crate::{
     events::CollateralRemoved,
     math::{self, f64_to_scaled_price},
     utils::risk_management::*,
-    state::{Contract, Custody, OraclePrice, Pool, Position, Side, PositionType},
+    state::{Contract, Custody, OraclePrice, Pool, Position, Side, OrderType},
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
@@ -31,7 +31,7 @@ pub fn remove_collateral(
     // Validation
     require_keys_eq!(position.owner, ctx.accounts.owner.key(), TradingError::Unauthorized);
     require!(!position.is_liquidated, PerpetualError::PositionLiquidated);
-    require!(position.position_type == PositionType::Market, PerpetualError::InvalidPositionType);
+    require!(position.order_type == OrderType::Market, PerpetualError::InvalidOrderType);
     require!(params.collateral_amount > 0, TradingError::InvalidAmount);
     require!(
         params.collateral_amount < position.collateral_amount,
@@ -74,7 +74,7 @@ pub fn remove_collateral(
     let new_collateral_usd = math::checked_sub(position.collateral_usd, collateral_usd_to_remove)?;
     
     // Calculate new leverage and ensure it doesn't exceed limits
-    let new_leverage = math::checked_div(position.size_usd, new_collateral_usd)?;
+    let new_leverage = std::cmp::max(math::checked_div(position.size_usd, position.collateral_usd)?, 1);
     require!(new_leverage <= Position::MAX_LEVERAGE, PerpetualError::InvalidLeverage);
     
     // Calculate new margin requirements
@@ -217,12 +217,13 @@ pub fn remove_collateral(
     msg!("Withdrawal amount: {} tokens", withdrawal_tokens);
     
     emit!(CollateralRemoved {
+        pub_key: position.key(),
         owner: ctx.accounts.owner.key(),
         position_index: params.position_index,
         pool: pool.key(),
         custody: position.custody,
         collateral_custody: position.collateral_custody,
-        position_type: position.position_type as u8,
+        order_type: position.order_type as u8,
         side: position.side as u8,
         collateral_amount_removed: params.collateral_amount,
         collateral_usd_removed: collateral_usd_to_remove,

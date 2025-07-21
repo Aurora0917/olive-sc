@@ -7,7 +7,7 @@ use anchor_lang::prelude::*;
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct InitTpSlOrderbookParams {
-    pub position_type: u8,       // 0 = Perp, 1 = Option
+    pub order_type: u8,       // 0 = Perp, 1 = Option
     pub position_index: u64,     // Position or Option index
     pub pool_name: String,
 }
@@ -22,7 +22,7 @@ pub fn init_tp_sl_orderbook(
     let owner = ctx.accounts.owner.key();
     
     // Initialize based on position type
-    match params.position_type {
+    match params.order_type {
         0 => {
             // Perp position
             let position = &mut ctx.accounts.position.as_mut().unwrap();
@@ -36,7 +36,7 @@ pub fn init_tp_sl_orderbook(
             orderbook.initialize(
                 owner,
                 position.key(),
-                params.position_type,
+                params.order_type,
                 ctx.bumps.tp_sl_orderbook,
             )?;
             
@@ -56,20 +56,20 @@ pub fn init_tp_sl_orderbook(
             orderbook.initialize(
                 owner,
                 option.key(),
-                params.position_type,
+                params.order_type,
                 ctx.bumps.tp_sl_orderbook,
             )?;
             
             // Link option to orderbook
             option.tp_sl_orderbook = Some(orderbook.key());
         },
-        _ => return Err(TradingError::InvalidPositionType.into()),
+        _ => return Err(TradingError::InvalidOrderType.into()),
     }
     
     emit!(TpSlOrderbookInitialized {
         owner,
         position: orderbook.position,
-        position_type: orderbook.position_type,
+        contract_type: orderbook.contract_type,
         bump: orderbook.bump,
     });
     
@@ -91,7 +91,7 @@ pub struct InitTpSlOrderbook<'info> {
             owner.key().as_ref(),
             params.position_index.to_le_bytes().as_ref(),
             params.pool_name.as_bytes(),
-            params.position_type.to_le_bytes().as_ref(),
+            params.order_type.to_le_bytes().as_ref(),
         ],
         bump
     )]
@@ -104,10 +104,10 @@ pub struct InitTpSlOrderbook<'info> {
     )]
     pub pool: Box<Account<'info, Pool>>,
     
-    // Position account (for perps - only present when position_type = 0)
+    // Position account (for perps - only present when order_type = 0)
     pub position: Option<Box<Account<'info, Position>>>,
     
-    // Option account (for options - only present when position_type = 1)  
+    // Option account (for options - only present when order_type = 1)  
     pub option_detail: Option<Box<Account<'info, OptionDetail>>>,
     
     pub system_program: Program<'info, System>,

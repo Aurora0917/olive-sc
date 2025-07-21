@@ -2,7 +2,7 @@ use crate::{
     errors::{PerpetualError, TradingError},
     events::PerpPositionClosed,
     math::{self, f64_to_scaled_price},
-    state::{Contract, Custody, OraclePrice, Pool, Position, Side, PositionType},
+    state::{Contract, Custody, OraclePrice, Pool, Position, Side, OrderType},
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
@@ -39,7 +39,7 @@ pub fn close_perp_position(
     // Validation
     require_keys_eq!(position.owner, ctx.accounts.owner.key(), TradingError::Unauthorized);
     require!(!position.is_liquidated, PerpetualError::PositionLiquidated);
-    require!(position.position_type == PositionType::Market, PerpetualError::InvalidPositionType);
+    require!(position.order_type == OrderType::Market, PerpetualError::InvalidOrderType);
     require!(
         params.close_percentage > 0 && params.close_percentage <= 100, 
         TradingError::InvalidAmount
@@ -76,7 +76,8 @@ pub fn close_perp_position(
     // Calculate only borrow fees (no funding in peer-to-pool model)
     let interest_payment = pool.get_interest_payment(
         position.borrow_size_usd as u128,
-        position.cumulative_interest_snapshot
+        position.cumulative_interest_snapshot,
+        position.side
     )?;
     
     // Calculate amounts to close (proportional to percentage)
@@ -225,11 +226,13 @@ pub fn close_perp_position(
     position.update_time = current_time;
     
     emit!(PerpPositionClosed {
+        pub_key: position.key(),
+        index: position.index,
         owner: position.owner,
         pool: position.pool,
         custody: position.custody,
         collateral_custody: position.collateral_custody,
-        position_type: position.position_type as u8,
+        order_type: position.order_type as u8,
         side: position.side as u8,
         is_liquidated: position.is_liquidated,
         price: position.price,
@@ -240,7 +243,7 @@ pub fn close_perp_position(
         update_time: position.update_time,
         liquidation_price: position.liquidation_price,
         cumulative_interest_snapshot: position.cumulative_interest_snapshot,
-        opening_fee_paid: position.opening_fee_paid,
+        closing_fee_paid: closing_fee,
         total_fees_paid: position.total_fees_paid,
         locked_amount: position.locked_amount,
         collateral_amount: position.collateral_amount,
@@ -251,6 +254,8 @@ pub fn close_perp_position(
         bump: position.bump,
         close_percentage: params.close_percentage as u64,
         settlement_tokens: settlement_tokens,
+        realized_pnl: pnl_for_closed_portion * 1_000_000,
+        unrealized_pnl: pnl - pnl_for_closed_portion * 1_000_000,
     });
     
     Ok(())

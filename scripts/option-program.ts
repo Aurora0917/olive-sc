@@ -1268,7 +1268,7 @@ const main = async () => {
   // await init();
 
   contractData = await program.account.contract.fetch(contract);
-  console.log("Wallet:", provider.wallet.publicKey.toBase58());
+  // console.log("Wallet:", provider.wallet.publicKey.toBase58());
 
   // const targetAddress = "AmASwHejc5MNtnVRpA9wJVH5k8g4V297tbdBs8jKBaFG";
   // await createFundedTokenAccountsViaTransfer(targetAddress);
