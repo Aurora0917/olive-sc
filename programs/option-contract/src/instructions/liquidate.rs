@@ -73,12 +73,15 @@ pub fn liquidate(
     // Calculate P&L
     let pnl = position.calculate_pnl(current_price_scaled)?;
     
-    // Calculate only borrow fees (no funding in peer-to-pool model)
+    // Calculate only borrow fees using time-based accrual
     let funding_payment = 0i128; // No funding in peer-to-pool model
-    let interest_payment = pool.get_interest_payment(
-        position.borrow_size_usd as u128,
-        position.cumulative_interest_snapshot,
-        position.side
+    
+    // Update accrued borrow fees before liquidation
+    let interest_payment = pool.update_position_borrow_fees(
+        position, 
+        current_time, 
+        sol_custody, 
+        usdc_custody
     )?;
     
     // Calculate liquidator reward (0.5% of position size)

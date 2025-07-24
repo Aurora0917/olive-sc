@@ -5,6 +5,7 @@ use crate::errors::TradingError;
 pub struct TpSlOrder {
     pub price: u64,           // Target price (scaled by 1e6)
     pub size_percent: u16,    // Percentage of position to close (basis points, max 10000 = 100%)
+    pub receive_sol: bool,    // true = receive SOL, false = receive USDC
     pub is_active: bool,      // Whether this order is active
 }
 
@@ -70,10 +71,10 @@ impl TpSlOrderbook {
         &mut self,
         price: u64,
         size_percent: u16,
+        receive_sol: bool,
     ) -> Result<usize> {
         require!(self.active_tp_count < Self::MAX_ORDERS as u8, TradingError::OrderbookFull);
         require!(size_percent > 0 && size_percent <= 10000, TradingError::InvalidAmount);
-        require!(self.total_tp_percent + size_percent <= 10000, TradingError::InvalidAmount);
         
         // Find first inactive slot
         for i in 0..Self::MAX_ORDERS {
@@ -81,6 +82,7 @@ impl TpSlOrderbook {
                 self.take_profit_orders[i] = TpSlOrder {
                     price,
                     size_percent,
+                    receive_sol,
                     is_active: true,
                 };
                 self.active_tp_count += 1;
@@ -96,10 +98,10 @@ impl TpSlOrderbook {
         &mut self,
         price: u64,
         size_percent: u16,
+        receive_sol: bool,
     ) -> Result<usize> {
         require!(self.active_sl_count < Self::MAX_ORDERS as u8, TradingError::OrderbookFull);
         require!(size_percent > 0 && size_percent <= 10000, TradingError::InvalidAmount);
-        require!(self.total_sl_percent + size_percent <= 10000, TradingError::InvalidAmount);
         
         // Find first inactive slot
         for i in 0..Self::MAX_ORDERS {
@@ -107,6 +109,7 @@ impl TpSlOrderbook {
                 self.stop_loss_orders[i] = TpSlOrder {
                     price,
                     size_percent,
+                    receive_sol,
                     is_active: true,
                 };
                 self.active_sl_count += 1;
@@ -147,6 +150,7 @@ impl TpSlOrderbook {
         index: usize,
         new_price: Option<u64>,
         new_size_percent: Option<u16>,
+        new_receive_sol: Option<bool>,
     ) -> Result<()> {
         require!(index < Self::MAX_ORDERS, TradingError::InvalidAmount);
         let order = &mut self.take_profit_orders[index];
@@ -159,10 +163,13 @@ impl TpSlOrderbook {
         if let Some(size_percent) = new_size_percent {
             require!(size_percent > 0 && size_percent <= 10000, TradingError::InvalidAmount);
             let new_total = self.total_tp_percent - order.size_percent + size_percent;
-            require!(new_total <= 10000, TradingError::InvalidAmount);
             
             self.total_tp_percent = new_total;
             order.size_percent = size_percent;
+        }
+        
+        if let Some(receive_sol) = new_receive_sol {
+            order.receive_sol = receive_sol;
         }
         
         Ok(())
@@ -173,6 +180,7 @@ impl TpSlOrderbook {
         index: usize,
         new_price: Option<u64>,
         new_size_percent: Option<u16>,
+        new_receive_sol: Option<bool>,
     ) -> Result<()> {
         require!(index < Self::MAX_ORDERS, TradingError::InvalidAmount);
         let order = &mut self.stop_loss_orders[index];
@@ -185,10 +193,13 @@ impl TpSlOrderbook {
         if let Some(size_percent) = new_size_percent {
             require!(size_percent > 0 && size_percent <= 10000, TradingError::InvalidAmount);
             let new_total = self.total_sl_percent - order.size_percent + size_percent;
-            require!(new_total <= 10000, TradingError::InvalidAmount);
             
             self.total_sl_percent = new_total;
             order.size_percent = size_percent;
+        }
+        
+        if let Some(receive_sol) = new_receive_sol {
+            order.receive_sol = receive_sol;
         }
         
         Ok(())

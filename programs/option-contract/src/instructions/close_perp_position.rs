@@ -37,7 +37,7 @@ pub fn close_perp_position(
     pool.update_rates(current_time, &custodies_vec)?;
     
     // Validation
-    require_keys_eq!(position.owner, ctx.accounts.owner.key(), TradingError::Unauthorized);
+    // require_keys_eq!(position.owner, ctx.accounts.owner.key(), TradingError::Unauthorized);
     require!(!position.is_liquidated, PerpetualError::PositionLiquidated);
     require!(position.order_type == OrderType::Market, PerpetualError::InvalidOrderType);
     require!(
@@ -73,11 +73,12 @@ pub fn close_perp_position(
     // Calculate P&L
     let pnl = position.calculate_pnl(current_price_scaled)?;
     
-    // Calculate only borrow fees (no funding in peer-to-pool model)
-    let interest_payment = pool.get_interest_payment(
-        position.borrow_size_usd as u128,
-        position.cumulative_interest_snapshot,
-        position.side
+    // Update accrued borrow fees before closing position
+    let interest_payment = pool.update_position_borrow_fees(
+        position, 
+        current_time, 
+        sol_custody, 
+        usdc_custody
     )?;
     
     // Calculate amounts to close (proportional to percentage)
@@ -265,11 +266,11 @@ pub fn close_perp_position(
 #[instruction(params: ClosePerpPositionParams)]
 pub struct ClosePerpPosition<'info> {
     #[account(mut)]
-    pub owner: Signer<'info>,
+    pub signer: Signer<'info>,
 
     #[account(
         mut,
-        has_one = owner
+        constraint = receiving_account.owner == position.owner
     )]
     pub receiving_account: Box<Account<'info, TokenAccount>>,
 
@@ -297,7 +298,7 @@ pub struct ClosePerpPosition<'info> {
         mut,
         seeds = [
             b"position",
-            owner.key().as_ref(),
+            position.owner.as_ref(),
             params.position_index.to_le_bytes().as_ref(),
             pool.key().as_ref()
         ],

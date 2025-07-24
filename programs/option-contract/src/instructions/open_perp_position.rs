@@ -226,13 +226,24 @@ pub fn open_perp_position(
     };
     position.liquidation_price = liquidation_price;
     
-    // Set snapshots from current pool state (side-specific)
-    position.cumulative_interest_snapshot = match params.side {
-        Side::Long => pool.cumulative_interest_rate_long,
-        Side::Short => pool.cumulative_interest_rate_short,
-    };
+    // Initialize borrow fee tracking based on order type
+    if params.order_type == OrderType::Market {
+        // Market orders start accruing borrow fees immediately
+        let relevant_custody = match params.side {
+            Side::Long => sol_custody.as_ref(),   // Long positions borrow SOL
+            Side::Short => usdc_custody.as_ref(), // Short positions borrow USDC
+        };
+        
+        let current_borrow_rate = pool.get_token_borrow_rate(relevant_custody)?;
+        position.cumulative_interest_snapshot = current_borrow_rate.to_bps().unwrap_or(0u32) as u128;
+        position.last_borrow_fee_update_time = current_time;
+    } else {
+        // Limit orders don't accrue borrow fees until executed
+        position.cumulative_interest_snapshot = 0;
+        position.last_borrow_fee_update_time = 0; // Will be set when executed
+    }
 
-    position.opening_fee_paid = 0;    
+    position.exiting_fee_paid = 0;    
     position.total_fees_paid = 0;
     
     // Asset amounts
@@ -279,7 +290,7 @@ pub fn open_perp_position(
         update_time: position.update_time,
         liquidation_price: position.liquidation_price,
         cumulative_interest_snapshot: position.cumulative_interest_snapshot,
-        opening_fee_paid: position.opening_fee_paid,
+        exiting_fee_paid: position.exiting_fee_paid,
         total_fees_paid: position.total_fees_paid,
         locked_amount: position.locked_amount,
         collateral_amount: position.collateral_amount,

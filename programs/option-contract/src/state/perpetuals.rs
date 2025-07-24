@@ -56,13 +56,14 @@ pub struct Position {
     
     // Borrow Fee Tracking (side-specific)
     pub cumulative_interest_snapshot: u128,  // Pool's cumulative borrow rate at position open (side-specific)
+    pub last_borrow_fee_update_time: i64,   // When borrow fees were last calculated/updated
     
     // Accrued Amounts (settled on close)
     pub accrued_borrow_fees: u64,           // Accrued borrow fees (always positive, always paid by position)
     
     // Fee Tracking
     pub total_fees_paid: u64,               // All fees paid
-    pub opening_fee_paid: u64,              // Opening fee
+    pub exiting_fee_paid: u64,              // Exiting fee
     
     // Asset Amounts (For settlement)
     pub locked_amount: u64,                  // Locked in pool
@@ -142,8 +143,49 @@ impl Position {
     ) -> Result<()> {
         self.accrued_borrow_fees = math::checked_add(self.accrued_borrow_fees, borrow_fee_payment)?;
         self.cumulative_interest_snapshot = new_interest_snapshot;
+        self.last_borrow_fee_update_time = current_time;
         self.update_time = current_time;
         Ok(())
+    }
+
+    // Calculate and accrue time-based borrow fees
+    pub fn calculate_and_accrue_borrow_fees(
+        &mut self,
+        current_time: i64,
+        current_borrow_rate_bps: u32, // Annual percentage rate in basis points
+    ) -> Result<u64> {
+        // Limit orders don't accrue borrow fees
+        if self.order_type == OrderType::Limit {
+            return Ok(0);
+        }
+        
+        if current_time <= self.last_borrow_fee_update_time {
+            return Ok(0); // No time elapsed
+        }
+
+        let time_elapsed_seconds = math::checked_sub(current_time, self.last_borrow_fee_update_time)? as u128;
+        
+        // Convert APR to per-second rate: rate_bps / (365 * 24 * 3600 * 10000)
+        // Formula: (position_size_usd * rate_bps * time_elapsed_seconds) / (365 * 24 * 3600 * 10000)
+        let seconds_per_year = 365u128 * 24 * 3600; // 31,536,000 seconds per year
+        let basis_points_scale = 10_000u128;
+        
+        let borrow_fee_accrued = math::checked_div(
+            math::checked_mul(
+                math::checked_mul(self.size_usd as u128, current_borrow_rate_bps as u128)?,
+                time_elapsed_seconds
+            )?,
+            math::checked_mul(seconds_per_year, basis_points_scale)?
+        )?;
+
+        let borrow_fee_accrued_u64 = math::checked_as_u64(borrow_fee_accrued)?;
+
+        // Update accrued fees and timestamp
+        self.accrued_borrow_fees = math::checked_add(self.accrued_borrow_fees, borrow_fee_accrued_u64)?;
+        self.last_borrow_fee_update_time = current_time;
+        self.update_time = current_time;
+
+        Ok(borrow_fee_accrued_u64)
     }
 
     pub fn should_execute_limit_order(&self, current_price: u64) -> bool {

@@ -33,32 +33,32 @@ pub fn update_borrow_fees(
     let custodies_vec: Vec<Custody> = custodies_slice.iter().map(|c| (***c).clone()).collect();
     pool.update_rates(current_time, &custodies_vec)?;
     
-    // Store previous snapshot
+    // Store previous values for logging
     let previous_interest_snapshot = position.cumulative_interest_snapshot;
+    let previous_borrow_fee_update_time = position.last_borrow_fee_update_time;
     
-    // Calculate borrow fee payment (on borrowed funds, side-specific)
-    let borrow_fee_payment = pool.get_interest_payment(
-        position.borrow_size_usd as u128,
-        position.cumulative_interest_snapshot,
-        position.side
+    // Calculate time-based borrow fee accrual using the helper method
+    let borrow_fee_payment = pool.update_position_borrow_fees(
+        position, 
+        current_time, 
+        sol_custody, 
+        usdc_custody
     )?;
+    
+    // Get relevant custody for logging
+    let relevant_custody = match position.side {
+        crate::state::Side::Long => sol_custody.as_ref(),  // Long positions borrow SOL
+        crate::state::Side::Short => usdc_custody.as_ref(), // Short positions borrow USDC
+    };
+    let current_borrow_rate = pool.get_token_borrow_rate(relevant_custody)?;
+    let current_borrow_rate_bps = current_borrow_rate.to_bps().unwrap_or(0u32);
     
     msg!("Position size USD: {}", position.size_usd);
-    msg!("Borrow size USD: {}", position.borrow_size_usd);
+    msg!("Position side: {:?}", position.side);
+    msg!("Using custody utilization: {:.2}%", crate::utils::pool::calculate_utilization(relevant_custody.token_locked, relevant_custody.token_owned));
+    msg!("Current borrow rate: {:.2}% APR", current_borrow_rate_bps as f64 / 100.0);
+    msg!("Time elapsed: {} seconds", current_time - previous_borrow_fee_update_time);
     msg!("Borrow fee payment: {}", borrow_fee_payment);
-    
-    // Get new snapshot (side-specific)
-    let new_interest_snapshot = match position.side {
-        crate::state::Side::Long => pool.cumulative_interest_rate_long,
-        crate::state::Side::Short => pool.cumulative_interest_rate_short,
-    };
-    
-    // Update position with accrued borrow fees
-    position.update_accrued_borrow_fees(
-        borrow_fee_payment.try_into().unwrap(),
-        new_interest_snapshot,
-        current_time,
-    )?;
     
     msg!("Updated accrued borrow fees: {}", position.accrued_borrow_fees);
     msg!("New interest snapshot: {}", position.cumulative_interest_snapshot);
@@ -77,7 +77,7 @@ pub fn update_borrow_fees(
         borrow_fee_payment: borrow_fee_payment.try_into().unwrap(),
         new_accrued_borrow_fees: position.accrued_borrow_fees,
         previous_interest_snapshot,
-        new_interest_snapshot,
+        new_interest_snapshot: current_borrow_rate_bps as u128,
         update_time: current_time,
     });
     

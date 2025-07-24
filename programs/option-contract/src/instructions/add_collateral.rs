@@ -153,6 +153,9 @@ pub fn add_collateral(
         position.side
     )?;
     
+    // Update accrued borrow fees before modifying position
+    pool.update_position_borrow_fees(position, current_time, sol_custody, usdc_custody)?;
+    
     position.liquidation_price = new_liquidation_price;
     position.update_time = current_time;
     

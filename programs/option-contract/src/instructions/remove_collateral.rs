@@ -205,6 +205,9 @@ pub fn remove_collateral(
     )?;
     position.collateral_usd = new_collateral_usd;
     position.borrow_size_usd = position.size_usd.saturating_sub(position.collateral_usd);
+    // Update accrued borrow fees before modifying position
+    pool.update_position_borrow_fees(position, current_time, sol_custody, usdc_custody)?;
+    
     position.liquidation_price = new_liquidation_price;
     position.update_time = current_time;
     

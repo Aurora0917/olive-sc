@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 
 use anchor_lang::prelude::*;
 
-use crate::{errors::PoolError, math, utils::{BorrowRateCurve, Fraction}};
+use crate::{errors::PoolError, math, utils::{self, BorrowRateCurve, Fraction}};
 
 use super::{Contract, Custody, OraclePrice};
 
@@ -326,124 +326,60 @@ impl Pool {
         )
     }
 
-    // Calculate current pool utilization based on borrowed funds vs available funds
-    pub fn calculate_utilization(&self, custodies: &[Custody]) -> Result<Fraction> {
-        let mut total_liquidity_usd = 0u128;
-        let mut total_borrowed_usd = 0u128;
-        
-        for custody in custodies {
-            // Calculate available liquidity (owned - locked)
-            let available_amount = math::checked_sub(custody.token_owned, custody.token_locked)?;
-            
-            // For simplicity, assume 1:1 USD ratio for now
-            // In production, this should use oracle prices
-            total_liquidity_usd = math::checked_add(total_liquidity_usd, available_amount as u128)?;
-            total_borrowed_usd = math::checked_add(total_borrowed_usd, custody.token_locked as u128)?;
-        }
-        
-        if total_liquidity_usd == 0 {
+    // Calculate per-token utilization and borrow rate
+    pub fn get_token_borrow_rate(&self, custody: &Custody) -> Result<Fraction> {
+        if custody.token_owned == 0 {
             return Ok(Fraction::ZERO);
         }
         
-        let utilization_bps = math::checked_div(
-            math::checked_mul(total_borrowed_usd, 10000)?, // Convert to basis points
-            total_liquidity_usd
-        )? as u32;
-        Ok(Fraction::from_bps(utilization_bps.min(10000)))
+        // Calculate per-token utilization: token_locked / token_owned
+        let token_utilization_pct = utils::pool::calculate_utilization(custody.token_locked, custody.token_owned);
+        let token_utilization_bps = (token_utilization_pct * 100.0) as u32;
+        let utilization = Fraction::from_bps(token_utilization_bps.min(10000));
+        
+        // Get borrow rate from curve for this specific token
+        self.borrow_rate_curve.get_borrow_rate(utilization)
     }
+
     
-    // Update borrow interest rates using the borrow rate curve
-    pub fn update_rates(&mut self, current_time: i64, custodies: &[Custody]) -> Result<()> {
-        if current_time <= self.last_rate_update {
-            return Ok(());
-        }
-        
-        let time_delta = current_time - self.last_rate_update;
-        
-        // Calculate current utilization
-        let utilization = self.calculate_utilization(custodies)?;
-        
-        // Get base borrow rate from curve
-        let base_borrow_rate = self.borrow_rate_curve.get_borrow_rate(utilization)?;
-        
-        // Calculate different rates for long/short based on open interest imbalance
-        let total_oi = math::checked_add(self.long_open_interest_usd, self.short_open_interest_usd)?;
-        let (long_rate_multiplier, short_rate_multiplier) = if total_oi > 0 {
-            // More demand for one side = higher borrow rate for that side
-            if self.long_open_interest_usd > self.short_open_interest_usd {
-                // More longs = longs pay higher borrow rate
-                (120, 100) // Longs pay 20% more, shorts pay base rate
-            } else if self.short_open_interest_usd > self.long_open_interest_usd {
-                // More shorts = shorts pay higher borrow rate  
-                (100, 120) // Longs pay base rate, shorts pay 20% more
-            } else {
-                (100, 100) // Equal = same rates
-            }
-        } else {
-            (100, 100) // No OI = same rates
-        };
-        
-        // Calculate time-based increments (per hour)
-        let hours_elapsed = math::checked_div(time_delta as u128, 3600)?; // 3600 seconds per hour
-        if hours_elapsed == 0 {
-            return Ok(());
-        }
-        
-        // Calculate base hourly rate increment
-        let base_rate_bps = base_borrow_rate.to_bps().unwrap_or(0u32) as u128;
-        let base_hourly_increment = math::checked_div(
-            math::checked_mul(base_rate_bps, hours_elapsed)?,
-            8760 // Hours in a year (APR to hourly)
-        )?;
-        
-        // Apply multipliers for long/short rates
-        let long_hourly_increment = math::checked_div(
-            math::checked_mul(base_hourly_increment, long_rate_multiplier)?,
-            100
-        )?;
-        let short_hourly_increment = math::checked_div(
-            math::checked_mul(base_hourly_increment, short_rate_multiplier)?,
-            100
-        )?;
-        
-        // Update cumulative interest rates
-        self.cumulative_interest_rate_long = math::checked_add(
-            self.cumulative_interest_rate_long,
-            long_hourly_increment
-        )?;
-        self.cumulative_interest_rate_short = math::checked_add(
-            self.cumulative_interest_rate_short,
-            short_hourly_increment
-        )?;
-        
+    // Legacy method - kept for backward compatibility 
+    // Individual position borrow rates are now calculated per-token in real-time
+    pub fn update_rates(&mut self, current_time: i64, _custodies: &[Custody]) -> Result<()> {
         self.last_rate_update = current_time;
         Ok(())
     }
     
-    // Calculate interest payment for a position based on side
-    pub fn get_interest_payment(&self, borrow_amount_usd: u128, position_snapshot: u128, side: crate::state::Side) -> Result<u64> {
-        let current_rate = match side {
-            crate::state::Side::Long => self.cumulative_interest_rate_long,
-            crate::state::Side::Short => self.cumulative_interest_rate_short,
-        };
-        
-        if current_rate <= position_snapshot {
+    // Update position borrow fees before any position modification
+    pub fn update_position_borrow_fees(
+        &self,
+        position: &mut crate::state::Position,
+        current_time: i64,
+        sol_custody: &Custody,
+        usdc_custody: &Custody,
+    ) -> Result<u64> {
+        // Limit orders don't pay borrow fees until executed
+        if position.order_type == crate::state::OrderType::Limit {
             return Ok(0);
         }
         
-        let rate_delta = math::checked_sub(current_rate, position_snapshot)?;
-        let interest_payment = math::checked_div(
-            math::checked_mul(borrow_amount_usd, rate_delta)?,
-            1_000_000 // Scale down from basis points
-        )?;
+        // Determine which custody to use based on position side
+        let relevant_custody = match position.side {
+            crate::state::Side::Long => sol_custody, // Long positions borrow SOL
+            crate::state::Side::Short => usdc_custody, // Short positions borrow USDC
+        };
         
-        math::checked_as_u64(interest_payment)
+        // Get current borrow rate for time-based calculation
+        let current_borrow_rate = self.get_token_borrow_rate(relevant_custody)?;
+        let current_borrow_rate_bps = current_borrow_rate.to_bps().unwrap_or(0u32);
+        
+        // Calculate and accrue time-based borrow fees
+        position.calculate_and_accrue_borrow_fees(current_time, current_borrow_rate_bps)
     }
+
     
-    // Get current borrow rate based on utilization
-    pub fn get_current_borrow_rate(&self, custodies: &[Custody]) -> Result<Fraction> {
-        let utilization = self.calculate_utilization(custodies)?;
-        self.borrow_rate_curve.get_borrow_rate(utilization)
+    // Get current borrow rate for a specific custody token
+    pub fn get_current_borrow_rate(&self, custody: &Custody) -> Result<Fraction> {
+        self.get_token_borrow_rate(custody)
     }
     
     // Get current open interest 

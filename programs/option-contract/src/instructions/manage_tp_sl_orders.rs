@@ -8,10 +8,10 @@ use anchor_lang::prelude::*;
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub enum OrderAction {
-    AddTakeProfit { price: u64, size_percent: u16 },
-    AddStopLoss { price: u64, size_percent: u16 },
-    UpdateTakeProfit { index: u8, new_price: Option<u64>, new_size_percent: Option<u16> },
-    UpdateStopLoss { index: u8, new_price: Option<u64>, new_size_percent: Option<u16> },
+    AddTakeProfit { price: u64, size_percent: u16, receive_sol: bool },
+    AddStopLoss { price: u64, size_percent: u16, receive_sol: bool },
+    UpdateTakeProfit { index: u8, new_price: Option<u64>, new_size_percent: Option<u16>, new_receive_sol: Option<bool> },
+    UpdateStopLoss { index: u8, new_price: Option<u64>, new_size_percent: Option<u16>, new_receive_sol: Option<bool> },
     RemoveTakeProfit { index: u8 },
     RemoveStopLoss { index: u8 },
     ClearAll,
@@ -109,32 +109,36 @@ pub fn manage_tp_sl_orders(
     
     // Execute action
     match params.action {
-        OrderAction::AddTakeProfit { price, size_percent } => {
-            let index = orderbook.add_take_profit_order(price, size_percent)?;
+        OrderAction::AddTakeProfit { price, size_percent, receive_sol } => {
+            let index = orderbook.add_take_profit_order(price, size_percent, receive_sol)?;
             emit!(TpSlOrderAdded {
                 owner,
                 position: orderbook.position,
                 contract_type: orderbook.contract_type,
                 trigger_order_type: 0, // 0 = TP
+                position_side: ctx.accounts.position.as_ref().unwrap().side as u8,
                 index: index as u8,
                 price,
                 size_percent,
+                receive_sol,
             });
         },
-        OrderAction::AddStopLoss { price, size_percent } => {
-            let index = orderbook.add_stop_loss_order(price, size_percent)?;
+        OrderAction::AddStopLoss { price, size_percent, receive_sol } => {
+            let index = orderbook.add_stop_loss_order(price, size_percent, receive_sol)?;
             emit!(TpSlOrderAdded {
                 owner,
                 position: orderbook.position,
                 contract_type: orderbook.contract_type,
                 trigger_order_type: 1, // 1 = SL
+                position_side: ctx.accounts.position.as_ref().unwrap().side as u8,
                 index: index as u8,
                 price,
                 size_percent,
+                receive_sol,
             });
         },
-        OrderAction::UpdateTakeProfit { index, new_price, new_size_percent } => {
-            orderbook.update_take_profit_order(index as usize, new_price, new_size_percent)?;
+        OrderAction::UpdateTakeProfit { index, new_price, new_size_percent, new_receive_sol } => {
+            orderbook.update_take_profit_order(index as usize, new_price, new_size_percent, new_receive_sol)?;
             emit!(TpSlOrderUpdated {
                 owner,
                 position: orderbook.position,
@@ -143,10 +147,11 @@ pub fn manage_tp_sl_orders(
                 index,
                 new_price,
                 new_size_percent,
+                new_receive_sol,
             });
         },
-        OrderAction::UpdateStopLoss { index, new_price, new_size_percent } => {
-            orderbook.update_stop_loss_order(index as usize, new_price, new_size_percent)?;
+        OrderAction::UpdateStopLoss { index, new_price, new_size_percent, new_receive_sol } => {
+            orderbook.update_stop_loss_order(index as usize, new_price, new_size_percent, new_receive_sol)?;
             emit!(TpSlOrderUpdated {
                 owner,
                 position: orderbook.position,
@@ -155,6 +160,7 @@ pub fn manage_tp_sl_orders(
                 index,
                 new_price,
                 new_size_percent,
+                new_receive_sol,
             });
         },
         OrderAction::RemoveTakeProfit { index } => {

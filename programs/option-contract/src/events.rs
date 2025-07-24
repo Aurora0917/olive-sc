@@ -177,7 +177,7 @@ pub struct PerpPositionOpened {
     pub update_time: i64,
     pub liquidation_price: u64,
     pub cumulative_interest_snapshot: u128,
-    pub opening_fee_paid: u64,
+    pub exiting_fee_paid: u64,
     pub total_fees_paid: u64,
     pub locked_amount: u64,
     pub collateral_amount: u64,
@@ -241,7 +241,7 @@ pub struct PerpTpSlSet {
     pub update_time: i64,
     pub liquidation_price: u64,
     pub cumulative_interest_snapshot: u128,
-    pub opening_fee_paid: u64,
+    pub exiting_fee_paid: u64,
     pub total_fees_paid: u64,
     pub locked_amount: u64,
     pub collateral_amount: u64,
@@ -272,7 +272,7 @@ pub struct LimitOrderExecuted {
     pub update_time: i64,
     pub liquidation_price: u64,
     pub cumulative_interest_snapshot: u128,
-    pub opening_fee_paid: u64,
+    pub exiting_fee_paid: u64,
     pub total_fees_paid: u64,
     pub locked_amount: u64,
     pub collateral_amount: u64,
@@ -303,7 +303,7 @@ pub struct LimitOrderCanceled {
     pub update_time: i64,
     pub liquidation_price: u64,
     pub cumulative_interest_snapshot: u128,
-    pub opening_fee_paid: u64,
+    pub exiting_fee_paid: u64,
     pub total_fees_paid: u64,
     pub locked_amount: u64,
     pub collateral_amount: u64,
@@ -408,9 +408,11 @@ pub struct TpSlOrderAdded {
     pub position: Pubkey,
     pub contract_type: u8,
     pub trigger_order_type: u8, // 0 = TP, 1 = SL
+    pub position_side: u8,
     pub index: u8,
     pub price: u64,
     pub size_percent: u16,
+    pub receive_sol: bool,
 }
 
 #[event]
@@ -422,6 +424,7 @@ pub struct TpSlOrderUpdated {
     pub index: u8,
     pub new_price: Option<u64>,
     pub new_size_percent: Option<u16>,
+    pub new_receive_sol: Option<bool>,
 }
 
 #[event]
@@ -440,9 +443,10 @@ pub struct TpSlOrderExecuted {
     pub contract_type: u8,
     pub trigger_order_type: u8, // 0 = TP, 1 = SL
     pub index: u8,
-    pub price: u64,
-    pub size_percent: u16,
-    pub execution_time: i64,
+    pub executed_price: u64,
+    pub executed_size_percent: u16,
+    pub receive_sol: bool,
+    pub executed_at: i64,
 }
 
 // Collateral management events
