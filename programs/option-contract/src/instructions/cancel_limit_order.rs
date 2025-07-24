@@ -164,9 +164,6 @@ pub fn cancel_limit_order(
         position.locked_amount =
             math::checked_sub(position.locked_amount, locked_amount_to_release)?;
 
-        // Recalculate borrow size for remaining position
-        position.borrow_size_usd = position.size_usd.saturating_sub(position.collateral_usd);
-
         // Keep the limit order type and trigger price for remaining position
     }
 
@@ -186,18 +183,15 @@ pub fn cancel_limit_order(
         is_liquidated: position.is_liquidated,
         price: position.price,
         size_usd: position.size_usd,
-        borrow_size_usd: position.borrow_size_usd,
         collateral_usd: position.collateral_usd,
         open_time: position.open_time,
         update_time: position.update_time,
         liquidation_price: position.liquidation_price,
         cumulative_interest_snapshot: position.cumulative_interest_snapshot,
-        exiting_fee_paid: position.exiting_fee_paid,
-        total_fees_paid: position.total_fees_paid,
+        trade_fees: position.trade_fees,
+        borrow_fees_paid: position.borrow_fees_paid,
         locked_amount: position.locked_amount,
         collateral_amount: position.collateral_amount,
-        take_profit_price: position.take_profit_price,
-        stop_loss_price: position.stop_loss_price,
         trigger_price: position.trigger_price,
         trigger_above_threshold: position.trigger_above_threshold,
         bump: position.bump,

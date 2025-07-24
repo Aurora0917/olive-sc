@@ -64,11 +64,6 @@ pub fn update_position_size(
     let previous_collateral_usd = position.collateral_usd;
     let previous_locked_amount = position.locked_amount;
     
-    // Get custody accounts for utilization calculation  
-    let custodies_slice = [sol_custody.as_ref(), usdc_custody.as_ref()];
-    let custodies_vec: Vec<Custody> = custodies_slice.iter().map(|c| (***c).clone()).collect();
-    pool.update_rates(current_time, &custodies_vec)?;
-    
     if params.is_increase {
         // Increase position size
         require!(params.collateral_delta > 0, TradingError::InvalidAmount);
@@ -100,13 +95,6 @@ pub fn update_position_size(
         // Calculate new position values
         let new_size_usd = math::checked_add(position.size_usd, params.size_delta_usd)?;
         let new_collateral_usd = math::checked_add(position.collateral_usd, collateral_usd_delta)?;
-        
-        // Check leverage
-        let new_leverage = math::checked_div(new_size_usd, new_collateral_usd)?;
-        require!(
-            new_leverage <= Position::MAX_LEVERAGE && new_leverage >= 1,
-            PerpetualError::InvalidLeverage
-        );
         
         // Calculate required liquidity for the size delta
         let required_liquidity_delta = if position.side == Side::Long {
@@ -321,9 +309,7 @@ pub fn update_position_size(
         }
     }
     
-    // Recalculate common values
-    position.borrow_size_usd = position.size_usd.saturating_sub(position.collateral_usd);
-    let new_leverage = math::checked_div(position.size_usd, position.collateral_usd)?;
+    let new_leverage = math::checked_float_div(position.size_usd as f64, position.collateral_usd as f64)?;
     
     // Recalculate liquidation price
     let new_liquidation_price = calculate_liquidation_price(
@@ -362,7 +348,6 @@ pub fn update_position_size(
         new_collateral_usd: position.collateral_usd,
         new_leverage,
         new_liquidation_price: position.liquidation_price,
-        new_borrow_size_usd: position.borrow_size_usd,
         locked_amount_delta: if params.is_increase { 
             position.locked_amount - previous_locked_amount 
         } else { 

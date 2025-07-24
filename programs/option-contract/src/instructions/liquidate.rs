@@ -26,14 +26,6 @@ pub fn liquidate(
     let sol_custody = &mut ctx.accounts.sol_custody;
     let usdc_custody = &mut ctx.accounts.usdc_custody;
     
-    // Update pool rates using the borrow rate curve
-    let current_time = Clock::get()?.unix_timestamp;
-    
-    // Get custody accounts for utilization calculation
-    let custodies_slice = [sol_custody.as_ref(), usdc_custody.as_ref()];
-    let custodies_vec: Vec<Custody> = custodies_slice.iter().map(|c| (***c).clone()).collect();
-    pool.update_rates(current_time, &custodies_vec)?;
-    
     // Validation
     require!(!position.is_liquidated, PerpetualError::PositionLiquidated);
     require!(position.order_type == OrderType::Market, PerpetualError::InvalidOrderType);
@@ -73,11 +65,8 @@ pub fn liquidate(
     // Calculate P&L
     let pnl = position.calculate_pnl(current_price_scaled)?;
     
-    // Calculate only borrow fees using time-based accrual
-    let funding_payment = 0i128; // No funding in peer-to-pool model
-    
     // Update accrued borrow fees before liquidation
-    let interest_payment = pool.update_position_borrow_fees(
+    let interest_payment: u64 = pool.update_position_borrow_fees(
         position, 
         current_time, 
         sol_custody, 
@@ -88,7 +77,7 @@ pub fn liquidate(
     let liquidator_reward_usd = 0; // 0.5%
     
     // Calculate net settlement after all deductions
-    let mut net_settlement = position.collateral_usd as i64 + pnl - funding_payment as i64 - interest_payment as i64 - liquidator_reward_usd as i64;
+    let mut net_settlement = position.collateral_usd as i64 + pnl as i64 - interest_payment as i64 - liquidator_reward_usd as i64 - position.trade_fees as i64;
     
     // Ensure settlement is not negative
     if net_settlement < 0 {
@@ -98,7 +87,6 @@ pub fn liquidate(
     let settlement_usd = net_settlement as u64;
     
     msg!("P&L: {}", pnl);
-    msg!("Funding payment: {}", funding_payment);
     msg!("Interest payment: {}", interest_payment);
     msg!("Liquidator reward USD: {}", liquidator_reward_usd);
     msg!("Net settlement USD: {}", settlement_usd);
@@ -190,11 +178,8 @@ pub fn liquidate(
     position.locked_amount = 0;
     position.update_time = current_time;
     
-    // Update fee tracking
-    let liquidation_fee = math::checked_div(position.size_usd, 100)?; // 1% liquidation fee
-    position.total_fees_paid = math::checked_add(position.total_fees_paid, liquidation_fee)?;
-    position.total_fees_paid = math::checked_add(position.total_fees_paid, interest_payment.try_into().unwrap())?;
-    position.total_fees_paid = math::checked_add(position.total_fees_paid, liquidator_reward_usd)?;
+    position.borrow_fees_paid = math::checked_add(position.borrow_fees_paid, interest_payment.try_into().unwrap())?;
+    position.accrued_borrow_fees = math::checked_sub(position.accrued_borrow_fees, position.borrow_fees_paid)?;
     
     emit!(PositionLiquidated {
         pub_key: position.key(),
@@ -208,18 +193,18 @@ pub fn liquidate(
         is_liquidated: position.is_liquidated,
         price: position.price,
         size_usd: position.size_usd,
-        borrow_size_usd: position.borrow_size_usd,
         collateral_usd: position.collateral_usd,
         open_time: position.open_time,
         update_time: position.update_time,
         liquidation_price: position.liquidation_price,
         cumulative_interest_snapshot: position.cumulative_interest_snapshot,
-        closing_fee_paid: liquidation_fee,
-        total_fees_paid: position.total_fees_paid,
+        trade_fees: 0,
+        trade_fees_paid: position.trade_fees,
+        borrow_fees_paid: interest_payment.try_into().unwrap(),
+        accrued_borrow_fees: position.accrued_borrow_fees,
+        last_borrow_fees_update_time: position.last_borrow_fees_update_time,
         locked_amount: position.locked_amount,
         collateral_amount: position.collateral_amount,
-        take_profit_price: position.take_profit_price,
-        stop_loss_price: position.stop_loss_price,
         trigger_price: position.trigger_price,
         trigger_above_threshold: position.trigger_above_threshold,
         bump: position.bump,

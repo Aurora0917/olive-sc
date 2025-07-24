@@ -340,14 +340,6 @@ impl Pool {
         // Get borrow rate from curve for this specific token
         self.borrow_rate_curve.get_borrow_rate(utilization)
     }
-
-    
-    // Legacy method - kept for backward compatibility 
-    // Individual position borrow rates are now calculated per-token in real-time
-    pub fn update_rates(&mut self, current_time: i64, _custodies: &[Custody]) -> Result<()> {
-        self.last_rate_update = current_time;
-        Ok(())
-    }
     
     // Update position borrow fees before any position modification
     pub fn update_position_borrow_fees(

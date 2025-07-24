@@ -1,7 +1,7 @@
 use crate::{
     errors::{PerpetualError, TradingError},
     events::CollateralAdded,
-    math::{self},
+    math::{self, f64_to_scaled_price},
     utils::risk_management::*,
     state::{Contract, Custody, OraclePrice, Pool, Position, OrderType},
 };
@@ -140,11 +140,8 @@ pub fn add_collateral(
         )?;
     }
     
-    // Recalculate borrow size (position size - collateral)
-    position.borrow_size_usd = position.size_usd.saturating_sub(position.collateral_usd);
-    
     // Recalculate margin requirements based on new collateral
-    let new_leverage = std::cmp::max(math::checked_div(position.size_usd, position.collateral_usd)?, 1);
+    let new_leverage = math::checked_float_div(position.size_usd as f64, position.collateral_usd as f64)?.max(1.0);
     
     // Recalculate liquidation price with new margin
     let new_liquidation_price = calculate_liquidation_price(
@@ -164,7 +161,6 @@ pub fn add_collateral(
     msg!("New collateral USD: {}", position.collateral_usd);
     msg!("New leverage: {}x", new_leverage);
     msg!("New liquidation price: {}", position.liquidation_price);
-    msg!("New borrow size USD: {}", position.borrow_size_usd);
     
     emit!(CollateralAdded {
         pub_key: position.key(),
@@ -179,9 +175,11 @@ pub fn add_collateral(
         collateral_usd_added: collateral_usd_to_add,
         new_collateral_amount: position.collateral_amount,
         new_collateral_usd: position.collateral_usd,
+        price: f64_to_scaled_price(sol_price_value)?,
         new_leverage,
         new_liquidation_price: position.liquidation_price,
-        new_borrow_size_usd: position.borrow_size_usd,
+        accrued_borrow_fees: position.accrued_borrow_fees,
+        last_borrow_fees_update_time: position.last_borrow_fees_update_time,
         update_time: current_time,
     });
     

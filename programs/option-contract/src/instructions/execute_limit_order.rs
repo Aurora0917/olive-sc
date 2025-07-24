@@ -91,13 +91,11 @@ pub fn execute_limit_order(
     position.price = current_price_scaled;
     position.order_type = OrderType::Market;
 
-    let new_leverage = math::checked_div(position.size_usd, position.collateral_usd)?;
+    let new_leverage = math::checked_float_div(position.size_usd as f64, position.collateral_usd as f64)?.max(1.0);
 
     // Calculate liquidation price for the new market position
     let liquidation_price =
         calculate_liquidation_price(current_price_scaled, new_leverage, position.side)?;
-
-    // Note: Limit orders don't accrue borrow fees until executed
 
     // Execute the limit order (convert to market position)
     position.execute_limit_order(current_price_scaled, current_time)?;
@@ -110,7 +108,7 @@ pub fn execute_limit_order(
     
     let current_borrow_rate = pool.get_token_borrow_rate(relevant_custody)?;
     position.cumulative_interest_snapshot = current_borrow_rate.to_bps().unwrap_or(0u32) as u128;
-    position.last_borrow_fee_update_time = current_time; // Start borrow fee tracking from execution
+    position.last_borrow_fees_update_time = current_time; // Start borrow fee tracking from execution
 
     if position.side == Side::Long {
         // Long positions always need SOL backing
@@ -123,6 +121,7 @@ pub fn execute_limit_order(
 
     // Update position with market position specifics
     position.liquidation_price = liquidation_price;
+    position.last_borrow_fees_update_time = current_time;
 
     // Update pool open interest tracking
     if position.side == Side::Long {
@@ -145,18 +144,16 @@ pub fn execute_limit_order(
         is_liquidated: position.is_liquidated,
         price: position.price,
         size_usd: position.size_usd,
-        borrow_size_usd: position.borrow_size_usd,
         collateral_usd: position.collateral_usd,
         open_time: position.open_time,
         update_time: position.update_time,
+        last_borrow_fees_update_time: position.last_borrow_fees_update_time,
         liquidation_price: position.liquidation_price,
         cumulative_interest_snapshot: position.cumulative_interest_snapshot,
-        exiting_fee_paid: position.exiting_fee_paid,
-        total_fees_paid: position.total_fees_paid,
+        trade_fees: position.trade_fees,
+        borrow_fees_paid: position.borrow_fees_paid,
         locked_amount: position.locked_amount,
         collateral_amount: position.collateral_amount,
-        take_profit_price: position.take_profit_price,
-        stop_loss_price: position.stop_loss_price,
         trigger_price: position.trigger_price,
         trigger_above_threshold: position.trigger_above_threshold,
         bump: position.bump,

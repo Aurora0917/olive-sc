@@ -5,13 +5,13 @@ use anchor_lang::prelude::*;
 
 pub fn calculate_liquidation_price(
     entry_price: u64,
-    leverage: u64,
+    leverage: f64,
     side: Side
 ) -> Result<u64> {
     let entry_price_f64 = math::checked_float_div(entry_price as f64, crate::math::PRICE_SCALE as f64)?;
     let margin_ratio = Position::LIQUIDATION_MARGIN_BPS as f64 / 10_000.0;
     
-    let max_loss_ratio = (1.0 / leverage as f64) - margin_ratio;
+    let max_loss_ratio = (1.0 / leverage) - margin_ratio;
     
     require!(max_loss_ratio > 0.0, PerpetualError::InvalidLeverage);
     

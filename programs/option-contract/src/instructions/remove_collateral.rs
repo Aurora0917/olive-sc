@@ -74,11 +74,11 @@ pub fn remove_collateral(
     let new_collateral_usd = math::checked_sub(position.collateral_usd, collateral_usd_to_remove)?;
     
     // Calculate new leverage and ensure it doesn't exceed limits
-    let new_leverage = std::cmp::max(math::checked_div(position.size_usd, position.collateral_usd)?, 1);
+    let new_leverage = math::checked_float_div(position.size_usd as f64, position.collateral_usd as f64)?.max(1.0);
     require!(new_leverage <= Position::MAX_LEVERAGE, PerpetualError::InvalidLeverage);
     
     // Calculate new margin requirements
-    let new_initial_margin_bps = math::checked_div(10_000u64, new_leverage)?;
+    let new_initial_margin_bps = math::checked_as_u64(math::checked_float_div(10_000.0, new_leverage)?)?; // 10000 / leverage
     
     // Ensure new margin requirements meet minimum standards
     require!(
@@ -204,7 +204,6 @@ pub fn remove_collateral(
         collateral_amount_to_subtract
     )?;
     position.collateral_usd = new_collateral_usd;
-    position.borrow_size_usd = position.size_usd.saturating_sub(position.collateral_usd);
     // Update accrued borrow fees before modifying position
     pool.update_position_borrow_fees(position, current_time, sol_custody, usdc_custody)?;
     
@@ -216,7 +215,6 @@ pub fn remove_collateral(
     msg!("New collateral USD: {}", position.collateral_usd);
     msg!("New leverage: {}x", new_leverage);
     msg!("New liquidation price: {}", position.liquidation_price);
-    msg!("New borrow size USD: {}", position.borrow_size_usd);
     msg!("Withdrawal amount: {} tokens", withdrawal_tokens);
     
     emit!(CollateralRemoved {
@@ -234,10 +232,11 @@ pub fn remove_collateral(
         new_collateral_usd: position.collateral_usd,
         new_leverage,
         new_liquidation_price: position.liquidation_price,
-        new_borrow_size_usd: position.borrow_size_usd,
         withdrawal_tokens,
         withdrawal_asset: if params.receive_sol { sol_custody.mint } else { usdc_custody.mint },
         update_time: current_time,
+        accrued_borrow_fees: position.accrued_borrow_fees,
+        last_borrow_fees_update_time: position.last_borrow_fees_update_time,
     });
     
     Ok(())

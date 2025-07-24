@@ -27,15 +27,11 @@ pub fn update_borrow_fees(
     require!(!position.is_liquidated, PerpetualError::PositionLiquidated);
     require!(position.order_type == OrderType::Market, PerpetualError::InvalidOrderType);
     
-    // Get current time and update pool rates
     let current_time = contract.get_time()?;
-    let custodies_slice = [sol_custody.as_ref(), usdc_custody.as_ref()];
-    let custodies_vec: Vec<Custody> = custodies_slice.iter().map(|c| (***c).clone()).collect();
-    pool.update_rates(current_time, &custodies_vec)?;
     
     // Store previous values for logging
     let previous_interest_snapshot = position.cumulative_interest_snapshot;
-    let previous_borrow_fee_update_time = position.last_borrow_fee_update_time;
+    let previous_borrow_fee_update_time = position.last_borrow_fees_update_time;
     
     // Calculate time-based borrow fee accrual using the helper method
     let borrow_fee_payment = pool.update_position_borrow_fees(
@@ -73,9 +69,9 @@ pub fn update_borrow_fees(
         order_type: position.order_type as u8,
         side: position.side as u8,
         position_size_usd: position.size_usd,
-        borrow_size_usd: position.borrow_size_usd,
         borrow_fee_payment: borrow_fee_payment.try_into().unwrap(),
         new_accrued_borrow_fees: position.accrued_borrow_fees,
+        last_borrow_fees_update_time: position.last_borrow_fees_update_time,
         previous_interest_snapshot,
         new_interest_snapshot: current_borrow_rate_bps as u128,
         update_time: current_time,

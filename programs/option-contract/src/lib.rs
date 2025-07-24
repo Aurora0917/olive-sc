@@ -169,11 +169,6 @@ pub mod option_contract {
         instructions::liquidate::liquidate(ctx, &params)
     }
 
-    // Set TP/SL for existing position
-    pub fn set_tp_sl(ctx: Context<SetTpSl>, params: SetTpSlParams) -> Result<()> {
-        instructions::set_tp_sl::set_tp_sl(ctx, &params)
-    }
-
     // Cancel limit order
     pub fn cancel_limit_order(ctx: Context<CancelLimitOrder>, params: CancelLimitOrderParams) -> Result<()> {
         instructions::cancel_limit_order::cancel_limit_order(ctx, &params)

@@ -45,7 +45,6 @@ pub struct Position {
     // Core Position Data
     pub price: u64,                          // Entry price (scaled) - for limit: trigger price
     pub size_usd: u64,                       // Position size in USD
-    pub borrow_size_usd: u64,               // Borrowed amount in USD
     pub collateral_usd: u64,                // Collateral value in USD at open
     pub open_time: i64,                     // When position was created
     pub update_time: i64,                   // Track updates
@@ -56,22 +55,18 @@ pub struct Position {
     
     // Borrow Fee Tracking (side-specific)
     pub cumulative_interest_snapshot: u128,  // Pool's cumulative borrow rate at position open (side-specific)
-    pub last_borrow_fee_update_time: i64,   // When borrow fees were last calculated/updated
+    pub last_borrow_fees_update_time: i64,   // When borrow fees were last calculated/updated
     
     // Accrued Amounts (settled on close)
     pub accrued_borrow_fees: u64,           // Accrued borrow fees (always positive, always paid by position)
     
     // Fee Tracking
-    pub total_fees_paid: u64,               // All fees paid
-    pub exiting_fee_paid: u64,              // Exiting fee
+    pub borrow_fees_paid: u64,               // All fees paid
+    pub trade_fees: u64,                     // Exiting fee
     
     // Asset Amounts (For settlement)
     pub locked_amount: u64,                  // Locked in pool
     pub collateral_amount: u64,             // Actual collateral tokens
-    
-    // TP/SL Storage (Store on-chain, backend checks & executes)
-    pub take_profit_price: Option<u64>,     // Backend monitors, executes when hit
-    pub stop_loss_price: Option<u64>,       // Backend monitors, executes when hit
     
     // TP/SL Orderbook reference (optional advanced feature)
     pub tp_sl_orderbook: Option<Pubkey>,    // Optional reference to TpSlOrderbook account
@@ -88,9 +83,10 @@ impl Position {
     pub const LEN: usize = 8 + std::mem::size_of::<Position>() + 33; // Added 33 bytes for Option<Pubkey>
     
     // 250x leverage = 0.4% initial margin
-    pub const MAX_LEVERAGE: u64 = 100;
+    pub const MAX_LEVERAGE: f64 = 100.0;
     pub const MIN_INITIAL_MARGIN_BPS: u64 = 100; // 1.0% for 100x leverage
     pub const LIQUIDATION_MARGIN_BPS: u64 = 40; // 0.4% liquidation threshold
+    pub const EXITING_FEE_BPS: u64 = 10;
     
     pub fn get_initial_leverage(&self) -> Result<u64> {
         if self.collateral_usd == 0 {
@@ -125,16 +121,6 @@ impl Position {
         Ok(())
     }
     
-    pub fn update_tp_sl(
-        &mut self,
-        take_profit: Option<u64>,
-        stop_loss: Option<u64>,
-    ) -> Result<()> {
-        self.take_profit_price = take_profit;
-        self.stop_loss_price = stop_loss;
-        Ok(())
-    }
-    
     pub fn update_accrued_borrow_fees(
         &mut self,
         borrow_fee_payment: u64,
@@ -143,7 +129,7 @@ impl Position {
     ) -> Result<()> {
         self.accrued_borrow_fees = math::checked_add(self.accrued_borrow_fees, borrow_fee_payment)?;
         self.cumulative_interest_snapshot = new_interest_snapshot;
-        self.last_borrow_fee_update_time = current_time;
+        self.last_borrow_fees_update_time = current_time;
         self.update_time = current_time;
         Ok(())
     }
@@ -159,11 +145,11 @@ impl Position {
             return Ok(0);
         }
         
-        if current_time <= self.last_borrow_fee_update_time {
+        if current_time <= self.last_borrow_fees_update_time {
             return Ok(0); // No time elapsed
         }
 
-        let time_elapsed_seconds = math::checked_sub(current_time, self.last_borrow_fee_update_time)? as u128;
+        let time_elapsed_seconds = math::checked_sub(current_time, self.last_borrow_fees_update_time)? as u128;
         
         // Convert APR to per-second rate: rate_bps / (365 * 24 * 3600 * 10000)
         // Formula: (position_size_usd * rate_bps * time_elapsed_seconds) / (365 * 24 * 3600 * 10000)
@@ -182,7 +168,7 @@ impl Position {
 
         // Update accrued fees and timestamp
         self.accrued_borrow_fees = math::checked_add(self.accrued_borrow_fees, borrow_fee_accrued_u64)?;
-        self.last_borrow_fee_update_time = current_time;
+        self.last_borrow_fees_update_time = current_time;
         self.update_time = current_time;
 
         Ok(borrow_fee_accrued_u64)
@@ -284,29 +270,5 @@ impl Position {
         )?;
         
         Ok(pnl as i64)
-    }
-    
-    pub fn calculate_funding_payment(&self, _current_cumulative_funding: u128) -> Result<i64> {
-        // No funding in peer-to-pool model, always return 0
-        let funding_diff = 0i128;
-        let funding_payment = math::checked_mul(
-            funding_diff as i128,
-            self.size_usd as i128,
-        )?;
-        
-        let final_payment = match self.side {
-            Side::Long => funding_payment,
-            Side::Short => -funding_payment,
-        };
-        
-        Ok(final_payment as i64)
-    }
-    
-    pub fn calculate_interest_payment(&self, current_cumulative_interest: u128) -> Result<u64> {
-        let interest_diff = current_cumulative_interest - self.cumulative_interest_snapshot;
-        math::checked_as_u64(math::checked_mul(
-            interest_diff as u128,
-            self.borrow_size_usd as u128,
-        )?)
-    }
+    }    
 }

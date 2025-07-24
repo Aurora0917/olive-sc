@@ -11,8 +11,7 @@ use anchor_spl::token::{Mint, Token, TokenAccount};
 pub struct ClosePerpPositionParams {
     pub position_index: u64,
     pub pool_name: String,
-    pub close_percentage: u8,        // 1-100: 100 = full close, <100 = partial close
-    pub min_price: f64,             // Slippage protection
+    pub close_percentage: u64,
     pub receive_sol: bool,          // true = receive SOL, false = receive USDC
 }
 
@@ -28,22 +27,16 @@ pub fn close_perp_position(
     let sol_custody = &mut ctx.accounts.sol_custody;
     let usdc_custody = &mut ctx.accounts.usdc_custody;
     
-    // Update pool rates using the borrow rate curve
-    let current_time = Clock::get()?.unix_timestamp;
-    
-    // Get custody accounts for utilization calculation
-    let custodies_slice = [sol_custody.as_ref(), usdc_custody.as_ref()];
-    let custodies_vec: Vec<Custody> = custodies_slice.iter().map(|c| (***c).clone()).collect();
-    pool.update_rates(current_time, &custodies_vec)?;
-    
     // Validation
     // require_keys_eq!(position.owner, ctx.accounts.owner.key(), TradingError::Unauthorized);
     require!(!position.is_liquidated, PerpetualError::PositionLiquidated);
     require!(position.order_type == OrderType::Market, PerpetualError::InvalidOrderType);
     require!(
-        params.close_percentage > 0 && params.close_percentage <= 100, 
+        params.close_percentage > 0 && params.close_percentage <= 100_000_000,
         TradingError::InvalidAmount
     );
+
+    let close_percentage = params.close_percentage as f64 / 1_000_000.0;
     
     // Get current prices from oracles
     let current_time = contract.get_time()?;
@@ -52,29 +45,22 @@ pub fn close_perp_position(
     
     let current_sol_price = sol_price.get_price();
     let usdc_price_value = usdc_price.get_price();
-    let is_full_close = params.close_percentage == 100;
+    let is_full_close = close_percentage == 100.0;
     
     msg!("SOL Price: {}", current_sol_price);
     msg!("USDC Price: {}", usdc_price_value);
     msg!("Closing at SOL price: ${}", current_sol_price);
     msg!("User chose to receive: {}", if params.receive_sol { "SOL" } else { "USDC" });
     msg!("Position side {:?}",  position.side);
-    msg!("min price {}",  params.min_price);
     
     // Slippage protection
     let current_price_scaled = f64_to_scaled_price(current_sol_price)?;
-    let min_price_scaled = f64_to_scaled_price(params.min_price)?;
-    
-    match position.side {
-        Side::Long => require!(current_price_scaled >= min_price_scaled, TradingError::PriceSlippage),
-        Side::Short => require!(current_price_scaled <= min_price_scaled, TradingError::PriceSlippage),
-    }
     
     // Calculate P&L
     let pnl = position.calculate_pnl(current_price_scaled)?;
     
     // Update accrued borrow fees before closing position
-    let interest_payment = pool.update_position_borrow_fees(
+    let interest_payment: u64 = pool.update_position_borrow_fees(
         position, 
         current_time, 
         sol_custody, 
@@ -82,7 +68,7 @@ pub fn close_perp_position(
     )?;
     
     // Calculate amounts to close (proportional to percentage)
-    let close_ratio = params.close_percentage as f64 / 100.0;
+    let close_ratio = close_percentage / 100.0;
     let size_usd_to_close = if is_full_close {
         position.size_usd
     } else {
@@ -108,22 +94,24 @@ pub fn close_perp_position(
         (pnl as f64 * close_ratio) as i64
     };
     
-    // No funding in peer-to-pool model
-    
     let interest_for_closed_portion = if is_full_close {
         interest_payment
     } else {
         math::checked_as_u64(interest_payment as f64 * close_ratio)?.into()
     };
+
+    let trade_fees_for_closed_portion = if is_full_close {
+        position.trade_fees
+    } else {
+        math::checked_as_u64(position.trade_fees as f64 * close_ratio)?.into()
+    }; 
     
     msg!("Size USD to close: {}", size_usd_to_close);
     msg!("Collateral amount to close: {}", collateral_amount_to_close);
     msg!("P&L for closed portion: {}", pnl_for_closed_portion);
-    // No funding fees in peer-to-pool model
     msg!("Interest for closed portion: {}", interest_for_closed_portion);
     
-    // Calculate net settlement amount (no funding fees in peer-to-pool model)
-    let mut net_settlement = collateral_usd_to_close as i64 + pnl_for_closed_portion - interest_for_closed_portion as i64;
+    let mut net_settlement = collateral_usd_to_close as i64 + pnl_for_closed_portion - interest_for_closed_portion as i64 - trade_fees_for_closed_portion as i64;
     
     // Ensure settlement is not negative
     if net_settlement < 0 {
@@ -210,19 +198,19 @@ pub fn close_perp_position(
         position.collateral_amount = 0;
         position.collateral_usd = 0;
         position.locked_amount = 0;
+        position.trade_fees = 0;
     } else {
         // Update position for partial close
         position.size_usd = math::checked_sub(position.size_usd, size_usd_to_close)?;
         position.collateral_amount = math::checked_sub(position.collateral_amount, collateral_amount_to_close)?;
         position.collateral_usd = math::checked_sub(position.collateral_usd, collateral_usd_to_close)?;
         position.locked_amount = math::checked_sub(position.locked_amount, locked_amount_to_release)?;
-        position.borrow_size_usd = position.size_usd.saturating_sub(position.collateral_usd);
+        position.trade_fees = math::checked_sub(position.trade_fees, trade_fees_for_closed_portion)?;
     }
     
     // Update fee tracking
-    let closing_fee = math::checked_div(size_usd_to_close, 1000)?; // 0.1% closing fee
-    position.total_fees_paid = math::checked_add(position.total_fees_paid, closing_fee)?;
-    position.total_fees_paid = math::checked_add(position.total_fees_paid, interest_for_closed_portion.try_into().unwrap())?;
+    position.borrow_fees_paid = math::checked_add(position.borrow_fees_paid, interest_for_closed_portion.try_into().unwrap())?;
+    position.accrued_borrow_fees = math::checked_sub(position.accrued_borrow_fees, interest_for_closed_portion.try_into().unwrap())?;
     
     position.update_time = current_time;
     
@@ -238,25 +226,24 @@ pub fn close_perp_position(
         is_liquidated: position.is_liquidated,
         price: position.price,
         size_usd: position.size_usd,
-        borrow_size_usd: position.borrow_size_usd,
         collateral_usd: position.collateral_usd,
         open_time: position.open_time,
         update_time: position.update_time,
         liquidation_price: position.liquidation_price,
         cumulative_interest_snapshot: position.cumulative_interest_snapshot,
-        closing_fee_paid: closing_fee,
-        total_fees_paid: position.total_fees_paid,
+        trade_fees: position.trade_fees,
+        trade_fees_paid: trade_fees_for_closed_portion,
+        borrow_fees_paid: interest_for_closed_portion.try_into().unwrap(),
+        accrued_borrow_fees: position.accrued_borrow_fees,
+        last_borrow_fees_update_time: position.last_borrow_fees_update_time,
         locked_amount: position.locked_amount,
         collateral_amount: position.collateral_amount,
-        take_profit_price: position.take_profit_price,
-        stop_loss_price: position.stop_loss_price,
         trigger_price: position.trigger_price,
         trigger_above_threshold: position.trigger_above_threshold,
         bump: position.bump,
         close_percentage: params.close_percentage as u64,
         settlement_tokens: settlement_tokens,
-        realized_pnl: pnl_for_closed_portion * 1_000_000,
-        unrealized_pnl: pnl - pnl_for_closed_portion * 1_000_000,
+        realized_pnl: pnl_for_closed_portion,
     });
     
     Ok(())
