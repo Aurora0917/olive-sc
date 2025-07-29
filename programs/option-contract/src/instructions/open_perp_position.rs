@@ -77,7 +77,8 @@ pub fn open_perp_position(
     )?;
 
     // Calculate leverage
-    let leverage = math::checked_float_div(params.size_amount as f64, params.collateral_amount as f64)?;
+    let leverage =
+        math::checked_float_div(params.size_amount as f64, params.collateral_amount as f64)?;
 
     msg!("Position Size USD: {}", size_usd);
     msg!("Collateral USD: {}", collateral_usd);
@@ -135,6 +136,35 @@ pub fn open_perp_position(
             usdc_tokens_needed * math::checked_powi(10.0, usdc_custody.decimals as i32)?,
         )?
     };
+
+    let normalized_collateral_amount = if params.side == Side::Long {
+        // For long positions, convert collateral to SOL token units
+        if params.pay_sol {
+            // Already in SOL, use as-is
+            params.collateral_amount
+        } else {
+            // Convert USDC collateral to equivalent SOL tokens
+            let collateral_usd_value = collateral_usd as f64 / 1_000_000.0;
+            let sol_tokens = collateral_usd_value / sol_price_value;
+            math::checked_as_u64(
+                sol_tokens * math::checked_powi(10.0, sol_custody.decimals as i32)?,
+            )?
+        }
+    } else {
+        // For short positions, convert collateral to USDC token units
+        if params.pay_sol {
+            // Convert SOL collateral to equivalent USDC tokens
+            let collateral_usd_value = collateral_usd as f64 / 1_000_000.0;
+            let usdc_tokens = collateral_usd_value / usdc_price_value;
+            math::checked_as_u64(
+                usdc_tokens * math::checked_powi(10.0, usdc_custody.decimals as i32)?,
+            )?
+        } else {
+            // Already in USDC, use as-is
+            params.collateral_amount
+        }
+    };
+
     if params.side == Side::Long {
         require_gte!(
             sol_custody.token_owned,
@@ -166,7 +196,7 @@ pub fn open_perp_position(
         params.collateral_amount,
     )?;
 
-    // Update custody stats
+    // Update custody stats - lock tokens only for MARKET orders (limit orders lock when executed)
     if params.order_type == OrderType::Market {
         if params.side == Side::Long {
             // Long positions always need SOL backing
@@ -225,7 +255,7 @@ pub fn open_perp_position(
 
     // Asset amounts
     position.locked_amount = required_liquidity;
-    position.collateral_amount = params.collateral_amount;
+    position.collateral_amount = normalized_collateral_amount;
 
     // TP/SL
     position.tp_sl_orderbook = None; // No orderbook initially

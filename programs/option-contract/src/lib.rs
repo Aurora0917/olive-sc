@@ -188,4 +188,10 @@ pub mod option_contract {
     pub fn manage_tp_sl_orders(ctx: Context<ManageTpSlOrders>, params: ManageTpSlOrdersParams) -> Result<()> {
         instructions::manage_tp_sl_orders::manage_tp_sl_orders(ctx, &params)
     }
+
+    // Execute TP/SL order - dedicated instruction for keepers
+    pub fn execute_tp_sl_order(ctx: Context<ExecuteTpSlOrder>, params: ExecuteTpSlOrderParams) -> Result<()> {
+        instructions::execute_tp_sl_order::execute_tp_sl_order(ctx, &params)
+    }
+
 }

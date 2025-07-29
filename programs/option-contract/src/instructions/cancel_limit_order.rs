@@ -1,8 +1,8 @@
 use crate::{
     errors::{PerpetualError, TradingError},
-    events::LimitOrderCanceled,
+    events::{LimitOrderCanceled, PositionAccountClosed, TpSlOrderbookClosed},
     math,
-    state::{Contract, Custody, OraclePrice, OrderType, Pool, Position},
+    state::{Contract, Custody, OraclePrice, OrderType, Pool, Position, TpSlOrderbook},
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
@@ -11,6 +11,7 @@ use anchor_spl::token::{Mint, Token, TokenAccount};
 pub struct CancelLimitOrderParams {
     pub position_index: u64,
     pub pool_name: String,
+    pub contract_type: u8,
     pub close_percentage: u8, // 1-100: 100 = full close, <100 = partial close
     pub receive_sol: bool,    // true = receive SOL, false = receive USDC
 }
@@ -142,10 +143,54 @@ pub fn cancel_limit_order(
             usdc_custody.token_owned =
                 math::checked_sub(usdc_custody.token_owned, collateral_amount_to_refund)?;
         }
+        
+        // Note: For limit orders, tokens were never locked at custody level when opened,
+        // so we don't need to release any locked tokens when canceling.
+        // Only executed limit orders have locked tokens, and they use close_perp_position to release.
     }
 
+    // Store position values before modification for account closure
+    let position_owner = position.owner;
+    let position_key = position.key();
+    let position_pool = position.pool;
+    
     // Update or close position
     if is_full_close {
+        msg!("Limit order fully canceled - will automatically close TP/SL orderbook and position accounts");
+        
+        // Clear all remaining TP/SL orders in orderbook if it exists
+        if let Some(orderbook_info) = ctx.accounts.tp_sl_orderbook.as_ref() {
+            // Validate the orderbook account if provided
+            let position_index_bytes = params.position_index.to_le_bytes();
+            let contract_type_bytes = params.contract_type.to_le_bytes();
+            let expected_seeds = [
+                b"tp_sl_orderbook",
+                position_owner.as_ref(),
+                position_index_bytes.as_ref(),
+                params.pool_name.as_bytes(),
+                contract_type_bytes.as_ref(),
+            ];
+            let (expected_key, _) = Pubkey::find_program_address(&expected_seeds, ctx.program_id);
+            require_keys_eq!(orderbook_info.key(), expected_key, TradingError::Unauthorized);
+            
+            // Check if account is initialized (has data and correct discriminator)
+            let orderbook_data = orderbook_info.try_borrow_data()?;
+            if orderbook_data.len() >= 8 {
+                // Try to deserialize - if it fails, the account is not properly initialized
+                if let Ok(_orderbook) = TpSlOrderbook::try_deserialize(&mut orderbook_data.as_ref()) {
+                    drop(orderbook_data); // Release the borrow
+                    
+                    // Account is valid, clear orders
+                    let mut orderbook_data = orderbook_info.try_borrow_mut_data()?;
+                    let mut orderbook = TpSlOrderbook::try_deserialize(&mut orderbook_data.as_ref())?;
+                    orderbook.clear_all_orders()?;
+                    
+                    // Serialize back
+                    orderbook.try_serialize(&mut orderbook_data.as_mut())?;
+                }
+            }
+        }
+        
         // Mark position as liquidated (canceled)
         position.is_liquidated = true;
         position.size_usd = 0;
@@ -172,10 +217,10 @@ pub fn cancel_limit_order(
     // No fees for canceling limit orders since they were never active positions
 
     emit!(LimitOrderCanceled {
-        pub_key: position.key(),
+        pub_key: position_key,
         index: position.index,
-        owner: position.owner,
-        pool: position.pool,
+        owner: position_owner,
+        pool: position_pool,
         custody: position.custody,
         collateral_custody: position.collateral_custody,
         order_type: position.order_type as u8,
@@ -199,6 +244,65 @@ pub fn cancel_limit_order(
         refunded_collateral: collateral_amount_to_refund,
         refunded_collateral_usd: collateral_usd_to_refund,
     });
+    
+    // Automatically close accounts if fully canceled
+    if is_full_close {
+        // Close TP/SL orderbook first if it exists and is initialized
+        if let Some(orderbook_info) = ctx.accounts.tp_sl_orderbook.as_ref() {
+            // Only close if the account has data (is initialized)
+            let orderbook_data = orderbook_info.try_borrow_data()?;
+            if orderbook_data.len() >= 8 {
+                let orderbook_rent = orderbook_info.lamports();
+                drop(orderbook_data); // Release the borrow
+                
+                **orderbook_info.try_borrow_mut_lamports()? = 0;
+                **ctx.accounts.owner.to_account_info().try_borrow_mut_lamports()? = ctx.accounts.owner
+                    .to_account_info()
+                    .lamports()
+                    .checked_add(orderbook_rent)
+                    .ok_or(ProgramError::ArithmeticOverflow)?;
+                    
+                // Clear orderbook data
+                {
+                    let mut orderbook_data = orderbook_info.try_borrow_mut_data()?;
+                    orderbook_data.fill(0);
+                }
+                
+                emit!(TpSlOrderbookClosed {
+                    owner: position_owner,
+                    position: position_key,
+                    contract_type: params.contract_type,
+                    rent_refunded: orderbook_rent,
+                });
+            }
+        }
+        
+        // Close position account
+        let position_rent = ctx.accounts.position.to_account_info().lamports();
+        **ctx.accounts.position.to_account_info().try_borrow_mut_lamports()? = 0;
+        **ctx.accounts.owner.to_account_info().try_borrow_mut_lamports()? = ctx.accounts.owner
+            .to_account_info()
+            .lamports()
+            .checked_add(position_rent)
+            .ok_or(ProgramError::ArithmeticOverflow)?;
+            
+        // Clear position account data
+        {
+            let position_info = ctx.accounts.position.to_account_info();
+            let mut position_data = position_info.try_borrow_mut_data()?;
+            position_data.fill(0);
+        }
+        
+        emit!(PositionAccountClosed {
+            owner: position_owner,
+            position_key,
+            position_index: params.position_index,
+            pool: position_pool,
+            rent_refunded: position_rent,
+        });
+        
+        msg!("TP/SL orderbook and position accounts automatically closed - all rent returned to user");
+    }
 
     Ok(())
 }
@@ -299,6 +403,9 @@ pub struct CancelLimitOrder<'info> {
     pub sol_mint: Box<Account<'info, Mint>>,
     #[account(mut)]
     pub usdc_mint: Box<Account<'info, Mint>>,
+
+    /// CHECK: Optional TP/SL orderbook account - may not exist if user never set TP/SL
+    pub tp_sl_orderbook: Option<AccountInfo<'info>>,
 
     pub token_program: Program<'info, Token>,
 }

@@ -212,6 +212,7 @@ pub struct PerpPositionClosed {
     pub borrow_fees_paid: u64,
     pub locked_amount: u64,
     pub collateral_amount: u64,
+    pub native_exit_amount: u64,
     pub trigger_price: Option<u64>,
     pub trigger_above_threshold: bool,
     pub bump: u8,
@@ -407,17 +408,69 @@ pub struct TpSlOrderRemoved {
 
 #[event]
 pub struct TpSlOrderExecuted {
+    // Position identification
+    pub position_index: u64,
+    pub position_key: Pubkey,
     pub owner: Pubkey,
-    pub position: Pubkey,
+    pub pool: Pubkey,
+    
+    // Position details
+    pub custody: Pubkey,
+    pub collateral_custody: Pubkey,
+    pub order_type: u8,
+    pub side: u8,
+    pub is_liquidated: bool,
+    pub entry_price: u64,
+    pub size_usd: u64,
+    pub collateral_usd: u64,
+    pub collateral_amount: u64,
+    pub native_exit_amount: u64,
+    pub locked_amount: u64,
+    
+    // TP/SL specific
     pub contract_type: u8,
     pub trigger_order_type: u8, // 0 = TP, 1 = SL
-    // pub accrued_borrow_fees: u64,
-    // pub last_borrow_fees_update_time: i64,
-    pub index: u8,
+    pub order_index: u8,
+    pub order_price: u64,
     pub executed_price: u64,
     pub executed_size_percent: u16,
     pub receive_sol: bool,
+    
+    // Fees and PnL
+    pub trade_fees: u64,
+    pub trade_fees_paid: u64,
+    pub borrow_fees_paid: u64,
+    pub accrued_borrow_fees: u64,
+    pub realized_pnl: i64,
+    pub settlement_tokens: u64,
+    
+    // Timestamps
+    pub open_time: i64,
+    pub update_time: i64,
     pub executed_at: i64,
+    pub last_borrow_fees_update_time: i64,
+    
+    // Additional info
+    pub liquidation_price: u64,
+    pub cumulative_interest_snapshot: u128,
+    pub is_full_close: bool,
+}
+
+#[event]
+pub struct TpSlOrderbookClosed {
+    pub owner: Pubkey,
+    pub position: Pubkey,
+    pub contract_type: u8,
+    pub rent_refunded: u64,
+}
+
+#[event]
+pub struct PositionAccountClosed {
+    pub owner: Pubkey,
+    pub position_key: Pubkey,
+    pub position_index: u64,
+    pub pool: Pubkey,
+    pub rent_refunded: u64,
 }
 
 // Collateral management events

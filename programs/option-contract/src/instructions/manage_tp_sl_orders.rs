@@ -1,7 +1,7 @@
 use crate::{
     errors::{TradingError, PerpetualError, OptionError},
     events::{TpSlOrderAdded, TpSlOrderRemoved, TpSlOrderUpdated},
-    state::{Pool, Position, OptionDetail, TpSlOrderbook, Side},
+    state::{Pool, Position, OptionDetail, TpSlOrderbook, Side, Contract, Custody},
     math::scaled_price_to_f64,
 };
 use anchor_lang::prelude::*;
@@ -37,6 +37,21 @@ pub fn manage_tp_sl_orders(
     // Validation
     require_keys_eq!(orderbook.owner, owner, TradingError::Unauthorized);
     require_eq!(orderbook.contract_type, params.contract_type, TradingError::InvalidOrderType);
+    
+    // Update borrow fees and position time for perp positions before managing TP/SL orders
+    if params.contract_type == 0 {
+        let contract = &ctx.accounts.contract;
+        let pool = &mut ctx.accounts.pool;
+        let position = ctx.accounts.position.as_mut().unwrap();
+        let sol_custody = ctx.accounts.sol_custody.as_mut().unwrap();
+        let usdc_custody = ctx.accounts.usdc_custody.as_mut().unwrap();
+        
+        let current_time = contract.get_time()?;
+        pool.update_position_borrow_fees(position, current_time, sol_custody, usdc_custody)?;
+        
+        // Update position timestamp to reflect TP/SL management activity
+        position.update_time = current_time;
+    }
     
     // Additional validation based on position type
     match params.contract_type {
@@ -212,6 +227,13 @@ pub struct ManageTpSlOrders<'info> {
     pub tp_sl_orderbook: Box<Account<'info, TpSlOrderbook>>,
     
     #[account(
+        seeds = [b"contract"],
+        bump = contract.bump
+    )]
+    pub contract: Box<Account<'info, Contract>>,
+    
+    #[account(
+        mut,
         seeds = [b"pool", params.pool_name.as_bytes()],
         bump = pool.bump
     )]
@@ -222,4 +244,8 @@ pub struct ManageTpSlOrders<'info> {
     
     // Option account (for options - only present when contract_type = 1)
     pub option_detail: Option<Box<Account<'info, OptionDetail>>>,
+    
+    // Custody accounts (for perps - only present when contract_type = 0)
+    pub sol_custody: Option<Box<Account<'info, Custody>>>,
+    pub usdc_custody: Option<Box<Account<'info, Custody>>>,
 }

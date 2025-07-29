@@ -110,6 +110,7 @@ pub fn execute_limit_order(
     position.cumulative_interest_snapshot = current_borrow_rate.to_bps().unwrap_or(0u32) as u128;
     position.last_borrow_fees_update_time = current_time; // Start borrow fee tracking from execution
 
+    // Lock tokens when executing limit order (they weren't locked when opened)
     if position.side == Side::Long {
         // Long positions always need SOL backing
         sol_custody.token_locked = math::checked_add(sol_custody.token_locked, position.locked_amount)?;

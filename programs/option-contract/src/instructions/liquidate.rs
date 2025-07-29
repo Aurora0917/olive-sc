@@ -1,8 +1,8 @@
 use crate::{
-    errors::PerpetualError,
-    events::PositionLiquidated,
+    errors::{PerpetualError, TradingError},
+    events::{PositionLiquidated, TpSlOrderbookClosed, PositionAccountClosed},
     math::{self, f64_to_scaled_price},
-    state::{Contract, Custody, OraclePrice, Pool, Position, Side, OrderType},
+    state::{Contract, Custody, OraclePrice, Pool, Position, Side, OrderType, TpSlOrderbook},
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
@@ -11,6 +11,7 @@ use anchor_spl::token::{Mint, Token, TokenAccount};
 pub struct LiquidateParams {
     pub position_index: u64,
     pub pool_name: String,
+    pub contract_type: u8,
     pub liquidator_reward_account: Pubkey, // Account to receive liquidator reward
 }
 
@@ -101,7 +102,7 @@ pub fn liquidate(
     // Settlement to position owner
     let settlement_tokens = if settlement_usd > 0 {
         let amount = math::checked_as_u64(settlement_usd as f64 / collateral_price)?;
-        math::checked_as_u64(amount as f64 * math::checked_powi(10.0, collateral_decimals as i32)?)?
+        math::checked_as_u64(amount as f64 * math::checked_powi(10.0, collateral_decimals as i32)? / 1_000_000.0)?
     } else {
         0
     };
@@ -170,7 +171,19 @@ pub fn liquidate(
         )?;
     }
     
-    // Mark position as liquidated
+    // Update pool open interest
+    if position.side == Side::Long {
+        pool.long_open_interest_usd = math::checked_sub(pool.long_open_interest_usd, position.size_usd as u128)?;
+    } else {
+        pool.short_open_interest_usd = math::checked_sub(pool.short_open_interest_usd, position.size_usd as u128)?;
+    }
+    
+    // Store values before modifying position for event emission and account closure
+    let position_owner = position.owner;
+    let position_key = position.key();
+    let position_pool = position.pool;
+    
+    // Mark position as liquidated (fully closed)
     position.is_liquidated = true;
     position.size_usd = 0;
     position.collateral_amount = 0;
@@ -178,14 +191,51 @@ pub fn liquidate(
     position.locked_amount = 0;
     position.update_time = current_time;
     
-    position.borrow_fees_paid = math::checked_add(position.borrow_fees_paid, interest_payment.try_into().unwrap())?;
-    position.accrued_borrow_fees = math::checked_sub(position.accrued_borrow_fees, position.borrow_fees_paid)?;
+    // Clear all remaining TP/SL orders in orderbook if it exists
+    if let Some(orderbook_info) = ctx.accounts.tp_sl_orderbook.as_ref() {
+        // Validate the orderbook account if provided
+        let position_index_bytes = _params.position_index.to_le_bytes();
+        let contract_type_bytes = _params.contract_type.to_le_bytes();
+        let expected_seeds = [
+            b"tp_sl_orderbook",
+            position_owner.as_ref(),
+            position_index_bytes.as_ref(),
+            _params.pool_name.as_bytes(),
+            contract_type_bytes.as_ref(),
+        ];
+        let (expected_key, _) = Pubkey::find_program_address(&expected_seeds, ctx.program_id);
+        require_keys_eq!(orderbook_info.key(), expected_key, TradingError::Unauthorized);
+        
+        // Check if account is initialized (has data and correct discriminator)
+        let orderbook_data = orderbook_info.try_borrow_data()?;
+        if orderbook_data.len() >= 8 {
+            // Try to deserialize - if it fails, the account is not properly initialized
+            if let Ok(_orderbook) = TpSlOrderbook::try_deserialize(&mut orderbook_data.as_ref()) {
+                drop(orderbook_data); // Release the borrow
+                
+                // Account is valid, clear orders
+                let mut orderbook_data = orderbook_info.try_borrow_mut_data()?;
+                let mut orderbook = TpSlOrderbook::try_deserialize(&mut orderbook_data.as_ref())?;
+                orderbook.clear_all_orders()?;
+                
+                // Serialize back
+                orderbook.try_serialize(&mut orderbook_data.as_mut())?;
+            }
+        }
+    }
+    
+    msg!("Position fully liquidated - will automatically close TP/SL orderbook and position accounts");
+
+    let interest_u64 = interest_payment.try_into().unwrap();
+    
+    position.borrow_fees_paid = math::checked_add(position.borrow_fees_paid, interest_u64)?;
+    position.accrued_borrow_fees = math::checked_sub(position.accrued_borrow_fees, interest_u64)?;
     
     emit!(PositionLiquidated {
-        pub_key: position.key(),
+        pub_key: position_key,
         index: position.index,
-        owner: position.owner,
-        pool: position.pool,
+        owner: position_owner,
+        pool: position_pool,
         custody: position.custody,
         collateral_custody: position.collateral_custody,
         order_type: position.order_type as u8,
@@ -213,6 +263,62 @@ pub fn liquidate(
         liquidator_reward_tokens,
         liquidator: ctx.accounts.liquidator.key(),
     });
+    
+    // Automatically close accounts - TP/SL orderbook first if it exists and is initialized
+    if let Some(orderbook_info) = ctx.accounts.tp_sl_orderbook.as_ref() {
+        // Only close if the account has data (is initialized)
+        let orderbook_data = orderbook_info.try_borrow_data()?;
+        if orderbook_data.len() >= 8 {
+            let orderbook_rent = orderbook_info.lamports();
+            drop(orderbook_data); // Release the borrow
+            
+            **orderbook_info.try_borrow_mut_lamports()? = 0;
+            **ctx.accounts.liquidator.to_account_info().try_borrow_mut_lamports()? = ctx.accounts.liquidator
+                .to_account_info()
+                .lamports()
+                .checked_add(orderbook_rent)
+                .ok_or(ProgramError::ArithmeticOverflow)?;
+                
+            // Clear orderbook data
+            {
+                let mut orderbook_data = orderbook_info.try_borrow_mut_data()?;
+                orderbook_data.fill(0);
+            }
+            
+            emit!(TpSlOrderbookClosed {
+                owner: position_owner,
+                position: position_key,
+                contract_type: _params.contract_type,
+                rent_refunded: orderbook_rent,
+            });
+        }
+    }
+    
+    // Close position account
+    let position_rent = ctx.accounts.position.to_account_info().lamports();
+    **ctx.accounts.position.to_account_info().try_borrow_mut_lamports()? = 0;
+    **ctx.accounts.liquidator.to_account_info().try_borrow_mut_lamports()? = ctx.accounts.liquidator
+        .to_account_info()
+        .lamports()
+        .checked_add(position_rent)
+        .ok_or(ProgramError::ArithmeticOverflow)?;
+        
+    // Clear position data
+    {
+        let position_info = ctx.accounts.position.to_account_info();
+        let mut position_data = position_info.try_borrow_mut_data()?;
+        position_data.fill(0);
+    }
+    
+    emit!(PositionAccountClosed {
+        owner: position_owner,
+        position_key,
+        position_index: _params.position_index,
+        pool: position_pool,
+        rent_refunded: position_rent,
+    });
+    
+    msg!("Position and TP/SL orderbook accounts automatically closed - all rent returned to liquidator");
     
     Ok(())
 }
@@ -314,6 +420,9 @@ pub struct Liquidate<'info> {
     pub sol_mint: Box<Account<'info, Mint>>,
     #[account(mut)]
     pub usdc_mint: Box<Account<'info, Mint>>,
+
+    /// CHECK: Optional TP/SL orderbook account - may not exist if user never set TP/SL
+    pub tp_sl_orderbook: Option<AccountInfo<'info>>,
 
     pub token_program: Program<'info, Token>,
 }

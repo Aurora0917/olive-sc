@@ -83,9 +83,9 @@ impl Position {
     pub const LEN: usize = 8 + std::mem::size_of::<Position>() + 33; // Added 33 bytes for Option<Pubkey>
     
     // 250x leverage = 0.4% initial margin
-    pub const MAX_LEVERAGE: f64 = 100.0;
-    pub const MIN_INITIAL_MARGIN_BPS: u64 = 100; // 1.0% for 100x leverage
-    pub const LIQUIDATION_MARGIN_BPS: u64 = 40; // 0.4% liquidation threshold
+    pub const MAX_LEVERAGE: f64 = 250.0;
+    pub const MIN_INITIAL_MARGIN_BPS: u64 = 40; // 1.0% for 100x leverage
+    pub const LIQUIDATION_MARGIN_BPS: u64 = 20; // 0.4% liquidation threshold
     pub const EXITING_FEE_BPS: u64 = 10;
     
     pub fn get_initial_leverage(&self) -> Result<u64> {

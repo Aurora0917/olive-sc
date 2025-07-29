@@ -120,6 +120,10 @@ pub enum PerpetualError {
     PositionAmountLimit,
     #[msg("Maximum utilization exceeded")]
     MaxUtilization,
+    #[msg("Position must be closed before closing account")]
+    PositionNotClosed,
+    #[msg("TP/SL order not triggered at current price")]
+    TpSlNotTriggered,
 }
 
 // General trading errors that apply to both options and perpetuals
@@ -179,6 +183,12 @@ pub enum TradingError {
     InvalidOption,
     #[msg("Orderbook is full")]
     OrderbookFull,
+    #[msg("Orderbook must be empty before closing")]
+    OrderbookNotEmpty,
+    #[msg("Position must be empty before closing account")]
+    PositionNotEmpty,
+    #[msg("Position must be closed before closing account")]
+    PositionNotClosed,
 }
 
 // Pool-specific errors

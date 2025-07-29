@@ -1,8 +1,8 @@
 use crate::{
     errors::{PerpetualError, TradingError},
-    events::PerpPositionClosed,
+    events::{PerpPositionClosed, PositionAccountClosed, TpSlOrderbookClosed},
     math::{self, f64_to_scaled_price},
-    state::{Contract, Custody, OraclePrice, Pool, Position, Side, OrderType},
+    state::{Contract, Custody, OraclePrice, Pool, Position, Side, OrderType, TpSlOrderbook},
 };
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
@@ -11,6 +11,7 @@ use anchor_spl::token::{Mint, Token, TokenAccount};
 pub struct ClosePerpPositionParams {
     pub position_index: u64,
     pub pool_name: String,
+    pub contract_type: u8,
     pub close_percentage: u64,
     pub receive_sol: bool,          // true = receive SOL, false = receive USDC
 }
@@ -20,6 +21,7 @@ pub fn close_perp_position(
     params: &ClosePerpPositionParams
 ) -> Result<()> {
     msg!("Closing {}% of perpetual position", params.close_percentage);
+    // Note: This instruction is used by both users and keepers for TP/SL execution
     
     let contract = &ctx.accounts.contract;
     let pool = &mut ctx.accounts.pool;
@@ -28,7 +30,7 @@ pub fn close_perp_position(
     let usdc_custody = &mut ctx.accounts.usdc_custody;
     
     // Validation
-    // require_keys_eq!(position.owner, ctx.accounts.owner.key(), TradingError::Unauthorized);
+    require_keys_eq!(position.owner, ctx.accounts.owner.key(), TradingError::Unauthorized);
     require!(!position.is_liquidated, PerpetualError::PositionLiquidated);
     require!(position.order_type == OrderType::Market, PerpetualError::InvalidOrderType);
     require!(
@@ -128,10 +130,22 @@ pub fn close_perp_position(
         let amount = math::checked_as_u64(settlement_usd as f64 / usdc_price_value)?;
         (amount, usdc_custody.decimals)
     };
+
+    let (native_exit_amount, native_exit_decimals) = if position.side == Side::Long {
+        let amount = math::checked_as_u64(settlement_usd as f64 / current_sol_price)?;
+        (amount, sol_custody.decimals)
+    } else {
+        let amount = math::checked_as_u64(settlement_usd as f64 / usdc_price_value)?;
+        (amount, usdc_custody.decimals)
+    };
     
     // Adjust for token decimals
     let settlement_tokens = math::checked_as_u64(
         settlement_amount as f64 * math::checked_powi(10.0, settlement_decimals as i32)? / 1_000_000.0
+    )?;
+
+    let native_exit_tokens = math::checked_as_u64(
+        native_exit_amount as f64 * math::checked_powi(10.0, native_exit_decimals as i32)? / 1_000_000.0
     )?;
     
     msg!("Settlement USD: {}", settlement_usd);
@@ -191,14 +205,57 @@ pub fn close_perp_position(
         pool.short_open_interest_usd = math::checked_sub(pool.short_open_interest_usd, size_usd_to_close as u128)?;
     }
     
+    // Store values before modifying position for event emission
+    let position_owner = position.owner;
+    let position_key = position.key();
+    let position_pool = position.pool;
+    
     // Update or close position
     if is_full_close {
+        msg!("Position fully closed - automatically closing TP/SL orderbook and position accounts");
+        
         position.is_liquidated = true; // Mark as closed
         position.size_usd = 0;
         position.collateral_amount = 0;
         position.collateral_usd = 0;
         position.locked_amount = 0;
         position.trade_fees = 0;
+        
+        // Clear all remaining TP/SL orders in orderbook if it exists
+        if let Some(orderbook_info) = ctx.accounts.tp_sl_orderbook.as_ref() {
+            // Validate the orderbook account if provided
+            let position_index_bytes = params.position_index.to_le_bytes();
+            let contract_type_bytes = params.contract_type.to_le_bytes();
+            let expected_seeds = [
+                b"tp_sl_orderbook",
+                position_owner.as_ref(),
+                position_index_bytes.as_ref(),
+                params.pool_name.as_bytes(),
+                contract_type_bytes.as_ref(),
+            ];
+            let (expected_key, _) = Pubkey::find_program_address(&expected_seeds, ctx.program_id);
+            require_keys_eq!(orderbook_info.key(), expected_key, TradingError::Unauthorized);
+            
+            // Check if account is initialized (has data and correct discriminator)
+            let orderbook_data = orderbook_info.try_borrow_data()?;
+            if orderbook_data.len() >= 8 {
+                // Try to deserialize - if it fails, the account is not properly initialized
+                if let Ok(_orderbook) = TpSlOrderbook::try_deserialize(&mut orderbook_data.as_ref()) {
+                    drop(orderbook_data); // Release the borrow
+                    
+                    // Account is valid, clear orders
+                    let mut orderbook_data = orderbook_info.try_borrow_mut_data()?;
+                    let mut orderbook = TpSlOrderbook::try_deserialize(&mut orderbook_data.as_ref())?;
+                    orderbook.clear_all_orders()?;
+                    
+                    // Serialize back
+                    orderbook.try_serialize(&mut orderbook_data.as_mut())?;
+                }
+            }
+        }
+        
+        msg!("Position fully closed - will automatically close TP/SL orderbook and position accounts");
+        
     } else {
         // Update position for partial close
         position.size_usd = math::checked_sub(position.size_usd, size_usd_to_close)?;
@@ -238,6 +295,7 @@ pub fn close_perp_position(
         last_borrow_fees_update_time: position.last_borrow_fees_update_time,
         locked_amount: position.locked_amount,
         collateral_amount: position.collateral_amount,
+        native_exit_amount: native_exit_tokens,
         trigger_price: position.trigger_price,
         trigger_above_threshold: position.trigger_above_threshold,
         bump: position.bump,
@@ -246,6 +304,65 @@ pub fn close_perp_position(
         realized_pnl: pnl_for_closed_portion,
     });
     
+    // Automatically close accounts if fully closed
+    if is_full_close {
+        // Close TP/SL orderbook first if it exists and is initialized
+        if let Some(orderbook_info) = ctx.accounts.tp_sl_orderbook.as_ref() {
+            // Only close if the account has data (is initialized)
+            let orderbook_data = orderbook_info.try_borrow_data()?;
+            if orderbook_data.len() >= 8 {
+                let orderbook_rent = orderbook_info.lamports();
+                drop(orderbook_data); // Release the borrow
+                
+                **orderbook_info.try_borrow_mut_lamports()? = 0;
+                **ctx.accounts.owner.to_account_info().try_borrow_mut_lamports()? = ctx.accounts.owner
+                    .to_account_info()
+                    .lamports()
+                    .checked_add(orderbook_rent)
+                    .ok_or(ProgramError::ArithmeticOverflow)?;
+                    
+                // Clear orderbook data
+                {
+                    let mut orderbook_data = orderbook_info.try_borrow_mut_data()?;
+                    orderbook_data.fill(0);
+                }
+                
+                emit!(TpSlOrderbookClosed {
+                    owner: position_owner,
+                    position: position_key,
+                    contract_type: params.contract_type,
+                    rent_refunded: orderbook_rent,
+                });
+            }
+        }
+        
+        // Close position account
+        let position_rent = ctx.accounts.position.to_account_info().lamports();
+        **ctx.accounts.position.to_account_info().try_borrow_mut_lamports()? = 0;
+        **ctx.accounts.owner.to_account_info().try_borrow_mut_lamports()? = ctx.accounts.owner
+            .to_account_info()
+            .lamports()
+            .checked_add(position_rent)
+            .ok_or(ProgramError::ArithmeticOverflow)?;
+            
+        // Clear position account data
+        {
+            let position_info = ctx.accounts.position.to_account_info();
+            let mut position_data = position_info.try_borrow_mut_data()?;
+            position_data.fill(0);
+        }
+        
+        emit!(PositionAccountClosed {
+            owner: position_owner,
+            position_key,
+            position_index: params.position_index,
+            pool: position_pool,
+            rent_refunded: position_rent,
+        });
+        
+        msg!("TP/SL orderbook and position accounts automatically closed - all rent returned to user");
+    }
+    
     Ok(())
 }
 
@@ -253,11 +370,11 @@ pub fn close_perp_position(
 #[instruction(params: ClosePerpPositionParams)]
 pub struct ClosePerpPosition<'info> {
     #[account(mut)]
-    pub signer: Signer<'info>,
+    pub owner: Signer<'info>,
 
     #[account(
         mut,
-        constraint = receiving_account.owner == position.owner
+        has_one = owner,
     )]
     pub receiving_account: Box<Account<'info, TokenAccount>>,
 
@@ -285,7 +402,7 @@ pub struct ClosePerpPosition<'info> {
         mut,
         seeds = [
             b"position",
-            position.owner.as_ref(),
+            owner.key().as_ref(),
             params.position_index.to_le_bytes().as_ref(),
             pool.key().as_ref()
         ],
@@ -345,6 +462,9 @@ pub struct ClosePerpPosition<'info> {
     pub sol_mint: Box<Account<'info, Mint>>,
     #[account(mut)]
     pub usdc_mint: Box<Account<'info, Mint>>,
+
+    /// CHECK: Optional TP/SL orderbook account - may not exist if user never set TP/SL
+    pub tp_sl_orderbook: Option<AccountInfo<'info>>,
 
     pub token_program: Program<'info, Token>,
 }
