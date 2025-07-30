@@ -373,11 +373,11 @@ pub struct TpSlOrderAdded {
     pub contract_type: u8,
     pub trigger_order_type: u8, // 0 = TP, 1 = SL
     pub position_side: u8,
-    // pub accrued_borrow_fees: u64,
-    // pub last_borrow_fees_update_time: i64,
+    pub accrued_borrow_fees: u64,
+    pub last_borrow_fees_update_time: i64,
     pub index: u8,
     pub price: u64,
-    pub size_percent: u16,
+    pub size_percent: u64,
     pub receive_sol: bool,
 }
 
@@ -388,10 +388,10 @@ pub struct TpSlOrderUpdated {
     pub contract_type: u8,
     pub trigger_order_type: u8, // 0 = TP, 1 = SL
     pub index: u8,
-    // pub accrued_borrow_fees: u64,
-    // pub last_borrow_fees_update_time: i64,
+    pub accrued_borrow_fees: u64,
+    pub last_borrow_fees_update_time: i64,
     pub new_price: Option<u64>,
-    pub new_size_percent: Option<u16>,
+    pub new_size_percent: Option<u64>,
     pub new_receive_sol: Option<bool>,
 }
 
@@ -399,8 +399,8 @@ pub struct TpSlOrderUpdated {
 pub struct TpSlOrderRemoved {
     pub owner: Pubkey,
     pub position: Pubkey,
-    // pub accrued_borrow_fees: u64,
-    // pub last_borrow_fees_update_time: i64,
+    pub accrued_borrow_fees: u64,
+    pub last_borrow_fees_update_time: i64,
     pub contract_type: u8,
     pub trigger_order_type: u8, // 0 = TP, 1 = SL
     pub index: u8,
@@ -433,7 +433,7 @@ pub struct TpSlOrderExecuted {
     pub order_index: u8,
     pub order_price: u64,
     pub executed_price: u64,
-    pub executed_size_percent: u16,
+    pub executed_size_percent: u64,
     pub receive_sol: bool,
     
     // Fees and PnL

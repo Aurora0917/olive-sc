@@ -273,7 +273,7 @@ pub fn liquidate(
             drop(orderbook_data); // Release the borrow
             
             **orderbook_info.try_borrow_mut_lamports()? = 0;
-            **ctx.accounts.liquidator.to_account_info().try_borrow_mut_lamports()? = ctx.accounts.liquidator
+            **ctx.accounts.owner.to_account_info().try_borrow_mut_lamports()? = ctx.accounts.owner
                 .to_account_info()
                 .lamports()
                 .checked_add(orderbook_rent)
@@ -297,7 +297,7 @@ pub fn liquidate(
     // Close position account
     let position_rent = ctx.accounts.position.to_account_info().lamports();
     **ctx.accounts.position.to_account_info().try_borrow_mut_lamports()? = 0;
-    **ctx.accounts.liquidator.to_account_info().try_borrow_mut_lamports()? = ctx.accounts.liquidator
+    **ctx.accounts.owner.to_account_info().try_borrow_mut_lamports()? = ctx.accounts.owner
         .to_account_info()
         .lamports()
         .checked_add(position_rent)
@@ -318,7 +318,7 @@ pub fn liquidate(
         rent_refunded: position_rent,
     });
     
-    msg!("Position and TP/SL orderbook accounts automatically closed - all rent returned to liquidator");
+    msg!("Position and TP/SL orderbook accounts automatically closed - all rent returned to owner");
     
     Ok(())
 }
@@ -328,6 +328,10 @@ pub fn liquidate(
 pub struct Liquidate<'info> {
     #[account(mut)]
     pub liquidator: Signer<'info>,
+
+    /// CHECK: Position owner account to receive rent refunds
+    #[account(mut)]
+    pub owner: AccountInfo<'info>,
 
     /// CHECK: Position owner for settlement
     #[account(mut)]
@@ -422,6 +426,7 @@ pub struct Liquidate<'info> {
     pub usdc_mint: Box<Account<'info, Mint>>,
 
     /// CHECK: Optional TP/SL orderbook account - may not exist if user never set TP/SL
+    #[account(mut)]
     pub tp_sl_orderbook: Option<AccountInfo<'info>>,
 
     pub token_program: Program<'info, Token>,

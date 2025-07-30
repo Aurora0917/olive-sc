@@ -12,7 +12,7 @@ pub struct CancelLimitOrderParams {
     pub position_index: u64,
     pub pool_name: String,
     pub contract_type: u8,
-    pub close_percentage: u8, // 1-100: 100 = full close, <100 = partial close
+    pub close_percentage: u64, // 1-100,000,000: 100,000,000 = full close (6 decimal precision)
     pub receive_sol: bool,    // true = receive SOL, false = receive USDC
 }
 
@@ -40,12 +40,12 @@ pub fn cancel_limit_order(
     );
     require!(position.size_usd > 0, PerpetualError::InvalidPositionSize);
     require!(
-        params.close_percentage > 0 && params.close_percentage <= 100,
+        params.close_percentage > 0 && params.close_percentage <= 100_000_000,
         TradingError::InvalidAmount
     );
 
     let current_time = contract.get_time()?;
-    let is_full_close = params.close_percentage == 100;
+    let is_full_close = params.close_percentage == 100_000_000;
 
     msg!("Canceling limit order for position:");
     msg!("Position size USD: {}", position.size_usd);
@@ -59,7 +59,7 @@ pub fn cancel_limit_order(
     msg!("Close percentage: {}%", params.close_percentage);
 
     // Calculate amounts to cancel (proportional to percentage)
-    let close_ratio = params.close_percentage as f64 / 100.0;
+    let close_ratio = params.close_percentage as f64 / 100_000_000.0;
 
     let size_usd_to_cancel = if is_full_close {
         position.size_usd

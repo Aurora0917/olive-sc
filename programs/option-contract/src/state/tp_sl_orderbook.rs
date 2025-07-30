@@ -4,7 +4,7 @@ use crate::errors::TradingError;
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, Default)]
 pub struct TpSlOrder {
     pub price: u64,           // Target price (scaled by 1e6)
-    pub size_percent: u16,    // Percentage of position to close (basis points, max 10000 = 100%)
+    pub size_percent: u64,    // Percentage of position to close (6 decimal precision, max 100,000,000 = 100%)
     pub receive_sol: bool,    // true = receive SOL, false = receive USDC
     pub is_active: bool,      // Whether this order is active
 }
@@ -24,8 +24,8 @@ pub struct TpSlOrderbook {
     // Counters
     pub active_tp_count: u8,        // Number of active TP orders
     pub active_sl_count: u8,        // Number of active SL orders
-    pub total_tp_percent: u16,      // Total percentage allocated to TPs (basis points)
-    pub total_sl_percent: u16,      // Total percentage allocated to SLs (basis points)
+    pub total_tp_percent: u64,      // Total percentage allocated to TPs (6 decimal precision)
+    pub total_sl_percent: u64,      // Total percentage allocated to SLs (6 decimal precision)
     
     // Execution tracking
     pub last_executed_tp_index: Option<u8>,  // Last executed TP order index
@@ -70,11 +70,11 @@ impl TpSlOrderbook {
     pub fn add_take_profit_order(
         &mut self,
         price: u64,
-        size_percent: u16,
+        size_percent: u64,
         receive_sol: bool,
     ) -> Result<usize> {
         require!(self.active_tp_count < Self::MAX_ORDERS as u8, TradingError::OrderbookFull);
-        require!(size_percent > 0 && size_percent <= 10000, TradingError::InvalidAmount);
+        require!(size_percent > 0 && size_percent <= 100_000_000, TradingError::InvalidAmount);
         
         // Find first inactive slot
         for i in 0..Self::MAX_ORDERS {
@@ -97,11 +97,11 @@ impl TpSlOrderbook {
     pub fn add_stop_loss_order(
         &mut self,
         price: u64,
-        size_percent: u16,
+        size_percent: u64,
         receive_sol: bool,
     ) -> Result<usize> {
         require!(self.active_sl_count < Self::MAX_ORDERS as u8, TradingError::OrderbookFull);
-        require!(size_percent > 0 && size_percent <= 10000, TradingError::InvalidAmount);
+        require!(size_percent > 0 && size_percent <= 100_000_000, TradingError::InvalidAmount);
         
         // Find first inactive slot
         for i in 0..Self::MAX_ORDERS {
@@ -149,7 +149,7 @@ impl TpSlOrderbook {
         &mut self,
         index: usize,
         new_price: Option<u64>,
-        new_size_percent: Option<u16>,
+        new_size_percent: Option<u64>,
         new_receive_sol: Option<bool>,
     ) -> Result<()> {
         require!(index < Self::MAX_ORDERS, TradingError::InvalidAmount);
@@ -161,7 +161,7 @@ impl TpSlOrderbook {
         }
         
         if let Some(size_percent) = new_size_percent {
-            require!(size_percent > 0 && size_percent <= 10000, TradingError::InvalidAmount);
+            require!(size_percent > 0 && size_percent <= 100_000_000, TradingError::InvalidAmount);
             let new_total = self.total_tp_percent - order.size_percent + size_percent;
             
             self.total_tp_percent = new_total;
@@ -179,7 +179,7 @@ impl TpSlOrderbook {
         &mut self,
         index: usize,
         new_price: Option<u64>,
-        new_size_percent: Option<u16>,
+        new_size_percent: Option<u64>,
         new_receive_sol: Option<bool>,
     ) -> Result<()> {
         require!(index < Self::MAX_ORDERS, TradingError::InvalidAmount);
@@ -191,7 +191,7 @@ impl TpSlOrderbook {
         }
         
         if let Some(size_percent) = new_size_percent {
-            require!(size_percent > 0 && size_percent <= 10000, TradingError::InvalidAmount);
+            require!(size_percent > 0 && size_percent <= 100_000_000, TradingError::InvalidAmount);
             let new_total = self.total_sl_percent - order.size_percent + size_percent;
             
             self.total_sl_percent = new_total;

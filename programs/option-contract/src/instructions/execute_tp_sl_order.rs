@@ -108,8 +108,8 @@ pub fn execute_tp_sl_order(
         }
     }
 
-    // Calculate close percentage from size_percent (basis points)
-    let close_percentage = size_percent as f64 / 100.0; // Convert basis points to percentage
+    // Calculate close percentage from size_percent (6 decimal precision: 100,000,000 = 100%)
+    let close_percentage = size_percent as f64 / 1_000_000.0; // Convert to percentage
     let is_full_close = close_percentage >= 100.0;
 
     // Calculate P&L using oracle price

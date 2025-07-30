@@ -464,6 +464,7 @@ pub struct ClosePerpPosition<'info> {
     pub usdc_mint: Box<Account<'info, Mint>>,
 
     /// CHECK: Optional TP/SL orderbook account - may not exist if user never set TP/SL
+    #[account(mut)]
     pub tp_sl_orderbook: Option<AccountInfo<'info>>,
 
     pub token_program: Program<'info, Token>,

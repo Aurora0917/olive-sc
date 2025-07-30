@@ -8,10 +8,10 @@ use anchor_lang::prelude::*;
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub enum OrderAction {
-    AddTakeProfit { price: u64, size_percent: u16, receive_sol: bool },
-    AddStopLoss { price: u64, size_percent: u16, receive_sol: bool },
-    UpdateTakeProfit { index: u8, new_price: Option<u64>, new_size_percent: Option<u16>, new_receive_sol: Option<bool> },
-    UpdateStopLoss { index: u8, new_price: Option<u64>, new_size_percent: Option<u16>, new_receive_sol: Option<bool> },
+    AddTakeProfit { price: u64, size_percent: u64, receive_sol: bool },
+    AddStopLoss { price: u64, size_percent: u64, receive_sol: bool },
+    UpdateTakeProfit { index: u8, new_price: Option<u64>, new_size_percent: Option<u64>, new_receive_sol: Option<bool> },
+    UpdateStopLoss { index: u8, new_price: Option<u64>, new_size_percent: Option<u64>, new_receive_sol: Option<bool> },
     RemoveTakeProfit { index: u8 },
     RemoveStopLoss { index: u8 },
     ClearAll,
@@ -126,12 +126,20 @@ pub fn manage_tp_sl_orders(
     match params.action {
         OrderAction::AddTakeProfit { price, size_percent, receive_sol } => {
             let index = orderbook.add_take_profit_order(price, size_percent, receive_sol)?;
+            let (accrued_borrow_fees, last_borrow_fees_update_time, position_side) = if params.contract_type == 0 {
+                let position = ctx.accounts.position.as_ref().unwrap();
+                (position.accrued_borrow_fees, position.last_borrow_fees_update_time, position.side as u8)
+            } else {
+                (0, 0, 0) // For options, position_side is not applicable
+            };
             emit!(TpSlOrderAdded {
                 owner,
                 position: orderbook.position,
                 contract_type: orderbook.contract_type,
                 trigger_order_type: 0, // 0 = TP
-                position_side: ctx.accounts.position.as_ref().unwrap().side as u8,
+                position_side,
+                accrued_borrow_fees,
+                last_borrow_fees_update_time,
                 index: index as u8,
                 price,
                 size_percent,
@@ -140,12 +148,20 @@ pub fn manage_tp_sl_orders(
         },
         OrderAction::AddStopLoss { price, size_percent, receive_sol } => {
             let index = orderbook.add_stop_loss_order(price, size_percent, receive_sol)?;
+            let (accrued_borrow_fees, last_borrow_fees_update_time, position_side) = if params.contract_type == 0 {
+                let position = ctx.accounts.position.as_ref().unwrap();
+                (position.accrued_borrow_fees, position.last_borrow_fees_update_time, position.side as u8)
+            } else {
+                (0, 0, 0) // For options, position_side is not applicable
+            };
             emit!(TpSlOrderAdded {
                 owner,
                 position: orderbook.position,
                 contract_type: orderbook.contract_type,
                 trigger_order_type: 1, // 1 = SL
-                position_side: ctx.accounts.position.as_ref().unwrap().side as u8,
+                position_side,
+                accrued_borrow_fees,
+                last_borrow_fees_update_time,
                 index: index as u8,
                 price,
                 size_percent,
@@ -154,12 +170,20 @@ pub fn manage_tp_sl_orders(
         },
         OrderAction::UpdateTakeProfit { index, new_price, new_size_percent, new_receive_sol } => {
             orderbook.update_take_profit_order(index as usize, new_price, new_size_percent, new_receive_sol)?;
+            let (accrued_borrow_fees, last_borrow_fees_update_time) = if params.contract_type == 0 {
+                let position = ctx.accounts.position.as_ref().unwrap();
+                (position.accrued_borrow_fees, position.last_borrow_fees_update_time)
+            } else {
+                (0, 0)
+            };
             emit!(TpSlOrderUpdated {
                 owner,
                 position: orderbook.position,
                 contract_type: orderbook.contract_type,
                 trigger_order_type: 0, // 0 = TP
                 index,
+                accrued_borrow_fees,
+                last_borrow_fees_update_time,
                 new_price,
                 new_size_percent,
                 new_receive_sol,
@@ -167,12 +191,20 @@ pub fn manage_tp_sl_orders(
         },
         OrderAction::UpdateStopLoss { index, new_price, new_size_percent, new_receive_sol } => {
             orderbook.update_stop_loss_order(index as usize, new_price, new_size_percent, new_receive_sol)?;
+            let (accrued_borrow_fees, last_borrow_fees_update_time) = if params.contract_type == 0 {
+                let position = ctx.accounts.position.as_ref().unwrap();
+                (position.accrued_borrow_fees, position.last_borrow_fees_update_time)
+            } else {
+                (0, 0)
+            };
             emit!(TpSlOrderUpdated {
                 owner,
                 position: orderbook.position,
                 contract_type: orderbook.contract_type,
                 trigger_order_type: 1, // 1 = SL
                 index,
+                accrued_borrow_fees,
+                last_borrow_fees_update_time,
                 new_price,
                 new_size_percent,
                 new_receive_sol,
@@ -180,9 +212,17 @@ pub fn manage_tp_sl_orders(
         },
         OrderAction::RemoveTakeProfit { index } => {
             orderbook.remove_take_profit_order(index as usize)?;
+            let (accrued_borrow_fees, last_borrow_fees_update_time) = if params.contract_type == 0 {
+                let position = ctx.accounts.position.as_ref().unwrap();
+                (position.accrued_borrow_fees, position.last_borrow_fees_update_time)
+            } else {
+                (0, 0)
+            };
             emit!(TpSlOrderRemoved {
                 owner,
                 position: orderbook.position,
+                accrued_borrow_fees,
+                last_borrow_fees_update_time,
                 contract_type: orderbook.contract_type,
                 trigger_order_type: 0, // 0 = TP
                 index,
@@ -190,9 +230,17 @@ pub fn manage_tp_sl_orders(
         },
         OrderAction::RemoveStopLoss { index } => {
             orderbook.remove_stop_loss_order(index as usize)?;
+            let (accrued_borrow_fees, last_borrow_fees_update_time) = if params.contract_type == 0 {
+                let position = ctx.accounts.position.as_ref().unwrap();
+                (position.accrued_borrow_fees, position.last_borrow_fees_update_time)
+            } else {
+                (0, 0)
+            };
             emit!(TpSlOrderRemoved {
                 owner,
                 position: orderbook.position,
+                accrued_borrow_fees,
+                last_borrow_fees_update_time,
                 contract_type: orderbook.contract_type,
                 trigger_order_type: 1, // 1 = SL
                 index,
