@@ -67,8 +67,8 @@ pub fn close_limit_option(ctx: Context<CloseLimitOption>, params: &CloseLimitOpt
 
         // Time decay logic for Black-Scholes
         let remaining_seconds = option_detail.expired_date.saturating_sub(current_time);
-        let remaining_days = remaining_seconds as f64 / 86400.0;
-        let remaining_years = remaining_days / 365.0;
+        // Calculate remaining years with higher precision to minimize rounding
+        let remaining_years = (remaining_seconds as f64) / (365.0 * 24.0 * 60.0 * 60.0);
 
         // Oracle price of underlying asset (SOL)
         let underlying_price = OraclePrice::new_from_oracle(

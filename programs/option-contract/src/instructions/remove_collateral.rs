@@ -181,18 +181,46 @@ pub fn remove_collateral(
             // Withdrawing SOL from SOL position - direct subtract
             params.collateral_amount
         } else {
-            // Withdrawing USDC from SOL position - convert USDC to SOL equivalent
-            let usd_value = collateral_usd_to_remove as f64 / 1_000_000.0;
-            let sol_value = usd_value / sol_price_value;
-            math::checked_as_u64(sol_value * math::checked_powi(10.0, sol_custody.decimals as i32)?)?
+            // Withdrawing USDC from SOL position - convert using integer math
+            let sol_price_scaled = sol_price.scale_to_exponent(-6)?;
+            let sol_amount_6_decimals = math::checked_div(
+                math::checked_mul(collateral_usd_to_remove as u128, 1_000_000u128)?,
+                sol_price_scaled.price as u128
+            )?;
+            
+            if sol_custody.decimals > 6 {
+                math::checked_as_u64(math::checked_mul(
+                    sol_amount_6_decimals,
+                    math::checked_pow(10u128, (sol_custody.decimals - 6) as usize)?
+                )?)?
+            } else {
+                math::checked_as_u64(math::checked_div(
+                    sol_amount_6_decimals,
+                    math::checked_pow(10u128, (6 - sol_custody.decimals) as usize)?
+                )?)?
+            }
         }
     } else {
         // Position stores USDC
         if params.receive_sol {
-            // Withdrawing SOL from USDC position - convert SOL to USDC equivalent
-            let usd_value = collateral_usd_to_remove as f64 / 1_000_000.0;
-            let usdc_value = usd_value / usdc_price_value;
-            math::checked_as_u64(usdc_value * math::checked_powi(10.0, usdc_custody.decimals as i32)?)?
+            // Withdrawing SOL from USDC position - convert using integer math
+            let usdc_price_scaled = usdc_price.scale_to_exponent(-6)?;
+            let usdc_amount_6_decimals = math::checked_div(
+                math::checked_mul(collateral_usd_to_remove as u128, 1_000_000u128)?,
+                usdc_price_scaled.price as u128
+            )?;
+            
+            if usdc_custody.decimals > 6 {
+                math::checked_as_u64(math::checked_mul(
+                    usdc_amount_6_decimals,
+                    math::checked_pow(10u128, (usdc_custody.decimals - 6) as usize)?
+                )?)?
+            } else {
+                math::checked_as_u64(math::checked_div(
+                    usdc_amount_6_decimals,
+                    math::checked_pow(10u128, (6 - usdc_custody.decimals) as usize)?
+                )?)?
+            }
         } else {
             // Withdrawing USDC from USDC position - direct subtract
             params.collateral_amount

@@ -67,20 +67,26 @@ impl std::ops::Add for Fraction {
 impl std::ops::Sub for Fraction {
     type Output = Self;
     fn sub(self, other: Self) -> Self {
-        Fraction { value: self.value.saturating_sub(other.value) }
+        // Use checked_sub to prevent underflow, falling back to 0
+        Fraction { value: self.value.checked_sub(other.value).unwrap_or(0) }
     }
 }
 
 impl std::ops::Mul<u128> for Fraction {
     type Output = Self;
     fn mul(self, scalar: u128) -> Self {
-        Fraction { value: self.value * scalar }
+        // Use saturating_mul to prevent overflow
+        Fraction { value: self.value.saturating_mul(scalar) }
     }
 }
 
 impl std::ops::Div<u128> for Fraction {
     type Output = Self;
     fn div(self, scalar: u128) -> Self {
-        Fraction { value: self.value / scalar }
+        if scalar == 0 {
+            Fraction { value: 0 }
+        } else {
+            Fraction { value: self.value / scalar }
+        }
     }
 }

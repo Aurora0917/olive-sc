@@ -120,21 +120,45 @@ pub fn open_perp_position(
     msg!("Entry Price: {}", entry_price);
     msg!("Liquidation Price: {}", liquidation_price);
 
-    // Check pool liquidity
+    // Check pool liquidity using integer math
     let required_liquidity = if params.side == Side::Long {
-        // Convert 6-decimal USD back to actual USD, then to SOL tokens
-        let usd_amount = size_usd as f64 / 1_000_000.0; // Convert back to actual USD
-        let sol_tokens_needed = usd_amount / sol_price_value;
-        math::checked_as_u64(
-            sol_tokens_needed * math::checked_powi(10.0, sol_custody.decimals as i32)?,
-        )?
+        // Convert USD to SOL tokens using integer math
+        let sol_price_scaled = sol_price.scale_to_exponent(-6)?;
+        let sol_amount_6_decimals = math::checked_div(
+            math::checked_mul(size_usd as u128, 1_000_000u128)?,
+            sol_price_scaled.price as u128
+        )?;
+        
+        if sol_custody.decimals > 6 {
+            math::checked_as_u64(math::checked_mul(
+                sol_amount_6_decimals,
+                math::checked_pow(10u128, (sol_custody.decimals - 6) as usize)?
+            )?)?
+        } else {
+            math::checked_as_u64(math::checked_div(
+                sol_amount_6_decimals,
+                math::checked_pow(10u128, (6 - sol_custody.decimals) as usize)?
+            )?)?
+        }
     } else {
-        // Convert 6-decimal USD to USDC tokens
-        let usd_amount = size_usd as f64 / 1_000_000.0; // Convert back to actual USD
-        let usdc_tokens_needed = usd_amount / usdc_price_value;
-        math::checked_as_u64(
-            usdc_tokens_needed * math::checked_powi(10.0, usdc_custody.decimals as i32)?,
-        )?
+        // Convert USD to USDC tokens using integer math
+        let usdc_price_scaled = usdc_price.scale_to_exponent(-6)?;
+        let usdc_amount_6_decimals = math::checked_div(
+            math::checked_mul(size_usd as u128, 1_000_000u128)?,
+            usdc_price_scaled.price as u128
+        )?;
+        
+        if usdc_custody.decimals > 6 {
+            math::checked_as_u64(math::checked_mul(
+                usdc_amount_6_decimals,
+                math::checked_pow(10u128, (usdc_custody.decimals - 6) as usize)?
+            )?)?
+        } else {
+            math::checked_as_u64(math::checked_div(
+                usdc_amount_6_decimals,
+                math::checked_pow(10u128, (6 - usdc_custody.decimals) as usize)?
+            )?)?
+        }
     };
 
     let normalized_collateral_amount = if params.side == Side::Long {
@@ -143,22 +167,46 @@ pub fn open_perp_position(
             // Already in SOL, use as-is
             params.collateral_amount
         } else {
-            // Convert USDC collateral to equivalent SOL tokens
-            let collateral_usd_value = collateral_usd as f64 / 1_000_000.0;
-            let sol_tokens = collateral_usd_value / sol_price_value;
-            math::checked_as_u64(
-                sol_tokens * math::checked_powi(10.0, sol_custody.decimals as i32)?,
-            )?
+            // Convert USDC collateral to equivalent SOL tokens using integer math
+            let sol_price_scaled = sol_price.scale_to_exponent(-6)?;
+            let sol_amount_6_decimals = math::checked_div(
+                math::checked_mul(collateral_usd as u128, 1_000_000u128)?,
+                sol_price_scaled.price as u128
+            )?;
+            
+            if sol_custody.decimals > 6 {
+                math::checked_as_u64(math::checked_mul(
+                    sol_amount_6_decimals,
+                    math::checked_pow(10u128, (sol_custody.decimals - 6) as usize)?
+                )?)?
+            } else {
+                math::checked_as_u64(math::checked_div(
+                    sol_amount_6_decimals,
+                    math::checked_pow(10u128, (6 - sol_custody.decimals) as usize)?
+                )?)?
+            }
         }
     } else {
         // For short positions, convert collateral to USDC token units
         if params.pay_sol {
-            // Convert SOL collateral to equivalent USDC tokens
-            let collateral_usd_value = collateral_usd as f64 / 1_000_000.0;
-            let usdc_tokens = collateral_usd_value / usdc_price_value;
-            math::checked_as_u64(
-                usdc_tokens * math::checked_powi(10.0, usdc_custody.decimals as i32)?,
-            )?
+            // Convert SOL collateral to equivalent USDC tokens using integer math
+            let usdc_price_scaled = usdc_price.scale_to_exponent(-6)?;
+            let usdc_amount_6_decimals = math::checked_div(
+                math::checked_mul(collateral_usd as u128, 1_000_000u128)?,
+                usdc_price_scaled.price as u128
+            )?;
+            
+            if usdc_custody.decimals > 6 {
+                math::checked_as_u64(math::checked_mul(
+                    usdc_amount_6_decimals,
+                    math::checked_pow(10u128, (usdc_custody.decimals - 6) as usize)?
+                )?)?
+            } else {
+                math::checked_as_u64(math::checked_div(
+                    usdc_amount_6_decimals,
+                    math::checked_pow(10u128, (6 - usdc_custody.decimals) as usize)?
+                )?)?
+            }
         } else {
             // Already in USDC, use as-is
             params.collateral_amount

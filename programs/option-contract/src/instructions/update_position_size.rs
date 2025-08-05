@@ -230,18 +230,44 @@ pub fn update_position_size(
             collateral_usd_to_return.saturating_sub(loss)
         };
         
-        // Calculate withdrawal tokens
-        let (withdrawal_tokens, withdrawal_decimals) = if params.receive_sol {
-            let amount = settlement_usd as f64 / sol_price_value;
-            (amount, sol_custody.decimals)
+        // Calculate withdrawal tokens using integer math
+        let withdrawal_token_amount = if params.receive_sol {
+            let sol_price_scaled = sol_price.scale_to_exponent(-6)?;
+            let sol_amount_6_decimals = math::checked_div(
+                math::checked_mul(settlement_usd as u128, 1_000_000u128)?,
+                sol_price_scaled.price as u128
+            )?;
+            
+            if sol_custody.decimals > 6 {
+                math::checked_as_u64(math::checked_mul(
+                    sol_amount_6_decimals,
+                    math::checked_pow(10u128, (sol_custody.decimals - 6) as usize)?
+                )?)?
+            } else {
+                math::checked_as_u64(math::checked_div(
+                    sol_amount_6_decimals,
+                    math::checked_pow(10u128, (6 - sol_custody.decimals) as usize)?
+                )?)?
+            }
         } else {
-            let amount = settlement_usd as f64 / usdc_price_value;
-            (amount, usdc_custody.decimals)
+            let usdc_price_scaled = usdc_price.scale_to_exponent(-6)?;
+            let usdc_amount_6_decimals = math::checked_div(
+                math::checked_mul(settlement_usd as u128, 1_000_000u128)?,
+                usdc_price_scaled.price as u128
+            )?;
+            
+            if usdc_custody.decimals > 6 {
+                math::checked_as_u64(math::checked_mul(
+                    usdc_amount_6_decimals,
+                    math::checked_pow(10u128, (usdc_custody.decimals - 6) as usize)?
+                )?)?
+            } else {
+                math::checked_as_u64(math::checked_div(
+                    usdc_amount_6_decimals,
+                    math::checked_pow(10u128, (6 - usdc_custody.decimals) as usize)?
+                )?)?
+            }
         };
-        
-        let withdrawal_token_amount = math::checked_as_u64(
-            withdrawal_tokens * math::checked_powi(10.0, withdrawal_decimals as i32)?
-        )?;
         
         // Transfer settlement to user
         if withdrawal_token_amount > 0 {

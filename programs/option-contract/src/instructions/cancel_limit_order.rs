@@ -58,31 +58,41 @@ pub fn cancel_limit_order(
     );
     msg!("Close percentage: {}%", params.close_percentage);
 
-    // Calculate amounts to cancel (proportional to percentage)
-    let close_ratio = params.close_percentage as f64 / 100_000_000.0;
-
+    // Calculate amounts to cancel (proportional to percentage) - using integer math to avoid precision loss
     let size_usd_to_cancel = if is_full_close {
         position.size_usd
     } else {
-        math::checked_as_u64(position.size_usd as f64 * close_ratio)?
+        math::checked_as_u64(math::checked_div(
+            math::checked_mul(position.size_usd as u128, params.close_percentage as u128)?,
+            100_000_000u128
+        )?)?
     };
 
     let collateral_amount_to_refund = if is_full_close {
         position.collateral_amount
     } else {
-        math::checked_as_u64(position.collateral_amount as f64 * close_ratio)?
+        math::checked_as_u64(math::checked_div(
+            math::checked_mul(position.collateral_amount as u128, params.close_percentage as u128)?,
+            100_000_000u128
+        )?)?
     };
 
     let collateral_usd_to_refund = if is_full_close {
         position.collateral_usd
     } else {
-        math::checked_as_u64(position.collateral_usd as f64 * close_ratio)?
+        math::checked_as_u64(math::checked_div(
+            math::checked_mul(position.collateral_usd as u128, params.close_percentage as u128)?,
+            100_000_000u128
+        )?)?
     };
 
     let locked_amount_to_release = if is_full_close {
         position.locked_amount
     } else {
-        math::checked_as_u64(position.locked_amount as f64 * close_ratio)?
+        math::checked_as_u64(math::checked_div(
+            math::checked_mul(position.locked_amount as u128, params.close_percentage as u128)?,
+            100_000_000u128
+        )?)?
     };
 
     msg!("Size USD to cancel: {}", size_usd_to_cancel);
@@ -100,22 +110,53 @@ pub fn cancel_limit_order(
     let sol_price = OraclePrice::new_from_oracle(&ctx.accounts.sol_oracle_account, current_time, false)?;
     let usdc_price = OraclePrice::new_from_oracle(&ctx.accounts.usdc_oracle_account, current_time, false)?;
     
-    let current_sol_price = sol_price.get_price();
-    let usdc_price_value = usdc_price.get_price();
-
-    let (settlement_amount, settlement_decimals) = if params.receive_sol {
-        let amount = math::checked_as_u64(collateral_usd_to_refund as f64 / current_sol_price)?;
-        (amount, sol_custody.decimals)
+    // Convert USD to tokens using integer math only
+    // collateral_usd_to_refund has 6 decimals (e.g., $100 = 100_000_000)
+    let settlement_tokens = if params.receive_sol {
+        // Scale SOL price to 6 decimals for consistent math
+        let sol_price_scaled = sol_price.scale_to_exponent(-6)?;
+        
+        // USD amount / SOL price = SOL amount (both with 6 decimals)
+        let sol_amount_6_decimals = math::checked_div(
+            math::checked_mul(collateral_usd_to_refund as u128, 1_000_000u128)?,
+            sol_price_scaled.price as u128
+        )?;
+        
+        // Scale from 6 decimals to SOL token decimals (usually 9)
+        if sol_custody.decimals > 6 {
+            math::checked_as_u64(math::checked_mul(
+                sol_amount_6_decimals,
+                math::checked_pow(10u128, (sol_custody.decimals - 6) as usize)?
+            )?)?
+        } else {
+            math::checked_as_u64(math::checked_div(
+                sol_amount_6_decimals,
+                math::checked_pow(10u128, (6 - sol_custody.decimals) as usize)?
+            )?)?
+        }
     } else {
-        let amount = math::checked_as_u64(collateral_usd_to_refund as f64 / usdc_price_value)?;
-        (amount, usdc_custody.decimals)
+        // Scale USDC price to 6 decimals
+        let usdc_price_scaled = usdc_price.scale_to_exponent(-6)?;
+        
+        // USD amount / USDC price = USDC amount
+        let usdc_amount_6_decimals = math::checked_div(
+            math::checked_mul(collateral_usd_to_refund as u128, 1_000_000u128)?,
+            usdc_price_scaled.price as u128
+        )?;
+        
+        // Scale from 6 decimals to USDC token decimals (usually 6)
+        if usdc_custody.decimals > 6 {
+            math::checked_as_u64(math::checked_mul(
+                usdc_amount_6_decimals,
+                math::checked_pow(10u128, (usdc_custody.decimals - 6) as usize)?
+            )?)?
+        } else {
+            math::checked_as_u64(math::checked_div(
+                usdc_amount_6_decimals,
+                math::checked_pow(10u128, (6 - usdc_custody.decimals) as usize)?
+            )?)?
+        }
     };
-
-    // Adjust for token decimals
-    let settlement_tokens = math::checked_as_u64(
-        settlement_amount as f64 * math::checked_powi(10.0, settlement_decimals as i32)?
-            / 1_000_000.0,
-    )?;
 
     // Transfer collateral back to user
     if collateral_amount_to_refund > 0 {

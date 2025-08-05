@@ -38,7 +38,7 @@ pub fn close_perp_position(
         TradingError::InvalidAmount
     );
 
-    let close_percentage = params.close_percentage as f64 / 1_000_000.0;
+    let is_full_close = params.close_percentage == 100_000_000;
     
     // Get current prices from oracles
     let current_time = contract.get_time()?;
@@ -47,7 +47,6 @@ pub fn close_perp_position(
     
     let current_sol_price = sol_price.get_price();
     let usdc_price_value = usdc_price.get_price();
-    let is_full_close = close_percentage == 100.0;
     
     msg!("SOL Price: {}", current_sol_price);
     msg!("USDC Price: {}", usdc_price_value);
@@ -69,43 +68,68 @@ pub fn close_perp_position(
         usdc_custody
     )?;
     
-    // Calculate amounts to close (proportional to percentage)
-    let close_ratio = close_percentage / 100.0;
+    // Calculate amounts to close (proportional to percentage) - using integer math
     let size_usd_to_close = if is_full_close {
         position.size_usd
     } else {
-        math::checked_as_u64(position.size_usd as f64 * close_ratio)?
+        math::checked_as_u64(math::checked_div(
+            math::checked_mul(position.size_usd as u128, params.close_percentage as u128)?,
+            100_000_000u128
+        )?)?
     };
     
     let collateral_amount_to_close = if is_full_close {
         position.collateral_amount
     } else {
-        math::checked_as_u64(position.collateral_amount as f64 * close_ratio)?
+        math::checked_as_u64(math::checked_div(
+            math::checked_mul(position.collateral_amount as u128, params.close_percentage as u128)?,
+            100_000_000u128
+        )?)?
     };
     
     let collateral_usd_to_close = if is_full_close {
         position.collateral_usd
     } else {
-        math::checked_as_u64(position.collateral_usd as f64 * close_ratio)?
+        math::checked_as_u64(math::checked_div(
+            math::checked_mul(position.collateral_usd as u128, params.close_percentage as u128)?,
+            100_000_000u128
+        )?)?
     };
     
     // Calculate P&L, funding, and interest for the portion being closed
     let pnl_for_closed_portion = if is_full_close {
         pnl
     } else {
-        (pnl as f64 * close_ratio) as i64
+        // Use integer math for PnL calculation
+        if pnl >= 0 {
+            math::checked_as_i64(math::checked_div(
+                math::checked_mul(pnl as u128, params.close_percentage as u128)?,
+                100_000_000u128
+            )?)?
+        } else {
+            -math::checked_as_i64(math::checked_div(
+                math::checked_mul((-pnl) as u128, params.close_percentage as u128)?,
+                100_000_000u128
+            )?)?
+        }
     };
     
     let interest_for_closed_portion = if is_full_close {
         interest_payment
     } else {
-        math::checked_as_u64(interest_payment as f64 * close_ratio)?.into()
+        math::checked_as_u64(math::checked_div(
+            math::checked_mul(interest_payment as u128, params.close_percentage as u128)?,
+            100_000_000u128
+        )?)?
     };
 
     let trade_fees_for_closed_portion = if is_full_close {
         position.trade_fees
     } else {
-        math::checked_as_u64(position.trade_fees as f64 * close_ratio)?.into()
+        math::checked_as_u64(math::checked_div(
+            math::checked_mul(position.trade_fees as u128, params.close_percentage as u128)?,
+            100_000_000u128
+        )?)?
     }; 
     
     msg!("Size USD to close: {}", size_usd_to_close);
@@ -122,31 +146,92 @@ pub fn close_perp_position(
     
     let settlement_usd = net_settlement as u64;
     
-    // Calculate settlement amount in requested asset
-    let (settlement_amount, settlement_decimals) = if params.receive_sol {
-        let amount = math::checked_as_u64(settlement_usd as f64 / current_sol_price)?;
-        (amount, sol_custody.decimals)
+    // Calculate settlement amount in requested asset using integer math
+    let settlement_tokens = if params.receive_sol {
+        // Scale SOL price to 6 decimals for consistent math
+        let sol_price_scaled = sol_price.scale_to_exponent(-6)?;
+        
+        // USD amount / SOL price = SOL amount (both with 6 decimals)
+        let sol_amount_6_decimals = math::checked_div(
+            math::checked_mul(settlement_usd as u128, 1_000_000u128)?,
+            sol_price_scaled.price as u128
+        )?;
+        
+        // Scale from 6 decimals to SOL token decimals
+        if sol_custody.decimals > 6 {
+            math::checked_as_u64(math::checked_mul(
+                sol_amount_6_decimals,
+                math::checked_pow(10u128, (sol_custody.decimals - 6) as usize)?
+            )?)?
+        } else {
+            math::checked_as_u64(math::checked_div(
+                sol_amount_6_decimals,
+                math::checked_pow(10u128, (6 - sol_custody.decimals) as usize)?
+            )?)?
+        }
     } else {
-        let amount = math::checked_as_u64(settlement_usd as f64 / usdc_price_value)?;
-        (amount, usdc_custody.decimals)
+        // Scale USDC price to 6 decimals
+        let usdc_price_scaled = usdc_price.scale_to_exponent(-6)?;
+        
+        // USD amount / USDC price = USDC amount
+        let usdc_amount_6_decimals = math::checked_div(
+            math::checked_mul(settlement_usd as u128, 1_000_000u128)?,
+            usdc_price_scaled.price as u128
+        )?;
+        
+        // Scale from 6 decimals to USDC token decimals
+        if usdc_custody.decimals > 6 {
+            math::checked_as_u64(math::checked_mul(
+                usdc_amount_6_decimals,
+                math::checked_pow(10u128, (usdc_custody.decimals - 6) as usize)?
+            )?)?
+        } else {
+            math::checked_as_u64(math::checked_div(
+                usdc_amount_6_decimals,
+                math::checked_pow(10u128, (6 - usdc_custody.decimals) as usize)?
+            )?)?
+        }
     };
 
-    let (native_exit_amount, native_exit_decimals) = if position.side == Side::Long {
-        let amount = math::checked_as_u64(settlement_usd as f64 / current_sol_price)?;
-        (amount, sol_custody.decimals)
+    let native_exit_tokens = if position.side == Side::Long {
+        // Long positions exit in SOL
+        let sol_price_scaled = sol_price.scale_to_exponent(-6)?;
+        let sol_amount_6_decimals = math::checked_div(
+            math::checked_mul(settlement_usd as u128, 1_000_000u128)?,
+            sol_price_scaled.price as u128
+        )?;
+        
+        if sol_custody.decimals > 6 {
+            math::checked_as_u64(math::checked_mul(
+                sol_amount_6_decimals,
+                math::checked_pow(10u128, (sol_custody.decimals - 6) as usize)?
+            )?)?
+        } else {
+            math::checked_as_u64(math::checked_div(
+                sol_amount_6_decimals,
+                math::checked_pow(10u128, (6 - sol_custody.decimals) as usize)?
+            )?)?
+        }
     } else {
-        let amount = math::checked_as_u64(settlement_usd as f64 / usdc_price_value)?;
-        (amount, usdc_custody.decimals)
+        // Short positions exit in USDC
+        let usdc_price_scaled = usdc_price.scale_to_exponent(-6)?;
+        let usdc_amount_6_decimals = math::checked_div(
+            math::checked_mul(settlement_usd as u128, 1_000_000u128)?,
+            usdc_price_scaled.price as u128
+        )?;
+        
+        if usdc_custody.decimals > 6 {
+            math::checked_as_u64(math::checked_mul(
+                usdc_amount_6_decimals,
+                math::checked_pow(10u128, (usdc_custody.decimals - 6) as usize)?
+            )?)?
+        } else {
+            math::checked_as_u64(math::checked_div(
+                usdc_amount_6_decimals,
+                math::checked_pow(10u128, (6 - usdc_custody.decimals) as usize)?
+            )?)?
+        }
     };
-    
-    // Adjust for token decimals
-    let settlement_tokens = math::checked_as_u64(
-        settlement_amount as f64 * math::checked_powi(10.0, settlement_decimals as i32)? / 1_000_000.0
-    )?;
-
-    let native_exit_tokens = math::checked_as_u64(
-        native_exit_amount as f64 * math::checked_powi(10.0, native_exit_decimals as i32)? / 1_000_000.0
-    )?;
     
     msg!("Settlement USD: {}", settlement_usd);
     msg!("Settlement tokens: {}", settlement_tokens);
@@ -170,7 +255,10 @@ pub fn close_perp_position(
     let locked_amount_to_release = if is_full_close {
         position.locked_amount
     } else {
-        math::checked_as_u64(position.locked_amount as f64 * close_ratio)?
+        math::checked_as_u64(math::checked_div(
+            math::checked_mul(position.locked_amount as u128, params.close_percentage as u128)?,
+            100_000_000u128
+        )?)?
     };
     
     if position.side == Side::Long {

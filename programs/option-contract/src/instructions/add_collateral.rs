@@ -114,10 +114,24 @@ pub fn add_collateral(
             // Adding SOL to SOL position - direct add
             params.collateral_amount
         } else {
-            // Adding USDC to SOL position - convert USDC to SOL
-            let usd_actual = collateral_usd_to_add as f64 / 1_000_000.0;
-            let sol_value = usd_actual / sol_price_value;
-            math::checked_as_u64(sol_value * math::checked_powi(10.0, sol_custody.decimals as i32)?)?
+            // Adding USDC to SOL position - convert USDC to SOL using integer math
+            let sol_price_scaled = sol_price.scale_to_exponent(-6)?;
+            let sol_amount_6_decimals = math::checked_div(
+                math::checked_mul(collateral_usd_to_add as u128, 1_000_000u128)?,
+                sol_price_scaled.price as u128
+            )?;
+            
+            if sol_custody.decimals > 6 {
+                math::checked_as_u64(math::checked_mul(
+                    sol_amount_6_decimals,
+                    math::checked_pow(10u128, (sol_custody.decimals - 6) as usize)?
+                )?)?  
+            } else {
+                math::checked_as_u64(math::checked_div(
+                    sol_amount_6_decimals,
+                    math::checked_pow(10u128, (6 - sol_custody.decimals) as usize)?
+                )?)?
+            }
         };
         position.collateral_amount = math::checked_add(
             position.collateral_amount,
@@ -126,10 +140,24 @@ pub fn add_collateral(
     } else {
         // Position stores collateral in USDC
         let usdc_amount_to_add = if params.pay_sol {
-            // Adding SOL to USDC position - convert SOL to USDC
-            let usd_actual = collateral_usd_to_add as f64 / 1_000_000.0;
-            let usdc_value = usd_actual / usdc_price_value;
-            math::checked_as_u64(usdc_value * math::checked_powi(10.0, usdc_custody.decimals as i32)?)?
+            // Adding SOL to USDC position - convert SOL to USDC using integer math
+            let usdc_price_scaled = usdc_price.scale_to_exponent(-6)?;
+            let usdc_amount_6_decimals = math::checked_div(
+                math::checked_mul(collateral_usd_to_add as u128, 1_000_000u128)?,
+                usdc_price_scaled.price as u128
+            )?;
+            
+            if usdc_custody.decimals > 6 {
+                math::checked_as_u64(math::checked_mul(
+                    usdc_amount_6_decimals,
+                    math::checked_pow(10u128, (usdc_custody.decimals - 6) as usize)?
+                )?)?
+            } else {
+                math::checked_as_u64(math::checked_div(
+                    usdc_amount_6_decimals,
+                    math::checked_pow(10u128, (6 - usdc_custody.decimals) as usize)?
+                )?)?
+            }
         } else {
             // Adding USDC to USDC position - direct add
             params.collateral_amount

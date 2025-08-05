@@ -75,10 +75,13 @@ pub fn auto_exercise(
         let strike_price_f64 = scaled_price_to_f64(option_detail.strike_price)?;
         if oracle_price > strike_price_f64 {
             // Calculate Sol Amount from Option Detail Value : call / covered sol
-            let amount = (oracle_price - strike_price_f64) * (option_detail.quantity as f64) / oracle_price;
+            // Use more precise calculation to minimize rounding
+            let price_diff = oracle_price - strike_price_f64;
+            let intrinsic_value = price_diff * (option_detail.quantity as f64);
+            let amount = intrinsic_value / oracle_price;
 
-            option_detail.profit = amount as u64;
-            option_detail.claimed = amount as u64;
+            option_detail.profit = math::checked_as_u64(amount.round())?;
+            option_detail.claimed = math::checked_as_u64(amount.round())?;
         } else {
             // Option expired out of the money - no profit
             option_detail.claimed = 0;
@@ -89,9 +92,10 @@ pub fn auto_exercise(
         let strike_price_f64 = scaled_price_to_f64(option_detail.strike_price)?;
         if strike_price_f64 > oracle_price {
             // Calculate Profit amount with option detail values: put / cash-secured usdc
-            let amount = (strike_price_f64 - oracle_price) * (option_detail.quantity as f64);
+            let price_diff = strike_price_f64 - oracle_price;
+            let amount = price_diff * (option_detail.quantity as f64);
 
-            option_detail.profit = amount as u64;
+            option_detail.profit = math::checked_as_u64(amount.round())?;
             option_detail.claimed = amount as u64;
         } else {
             // Option expired out of the money - no profit

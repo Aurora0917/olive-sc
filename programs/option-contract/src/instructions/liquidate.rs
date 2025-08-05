@@ -93,24 +93,64 @@ pub fn liquidate(
     msg!("Net settlement USD: {}", settlement_usd);
     
     // Calculate settlement amounts in tokens
-    let (collateral_price, collateral_decimals) = if position.collateral_custody == sol_custody.key() {
+    let (_collateral_price, collateral_decimals) = if position.collateral_custody == sol_custody.key() {
         (current_sol_price, sol_custody.decimals)
     } else {
         (usdc_price_value, usdc_custody.decimals)
     };
     
-    // Settlement to position owner
+    // Settlement to position owner using integer math
     let settlement_tokens = if settlement_usd > 0 {
-        let amount = math::checked_as_u64(settlement_usd as f64 / collateral_price)?;
-        math::checked_as_u64(amount as f64 * math::checked_powi(10.0, collateral_decimals as i32)? / 1_000_000.0)?
+        let collateral_price_scaled = if position.collateral_custody == sol_custody.key() {
+            sol_price.scale_to_exponent(-6)?
+        } else {
+            usdc_price.scale_to_exponent(-6)?
+        };
+        
+        let amount_6_decimals = math::checked_div(
+            math::checked_mul(settlement_usd as u128, 1_000_000u128)?,
+            collateral_price_scaled.price as u128
+        )?;
+        
+        if collateral_decimals > 6 {
+            math::checked_as_u64(math::checked_mul(
+                amount_6_decimals,
+                math::checked_pow(10u128, (collateral_decimals - 6) as usize)?
+            )?)?
+        } else {
+            math::checked_as_u64(math::checked_div(
+                amount_6_decimals,
+                math::checked_pow(10u128, (6 - collateral_decimals) as usize)?
+            )?)?
+        }
     } else {
         0
     };
     
-    // Liquidator reward tokens
+    // Liquidator reward tokens using integer math  
     let liquidator_reward_tokens = if liquidator_reward_usd > 0 {
-        let amount = math::checked_as_u64(liquidator_reward_usd as f64 / collateral_price)?;
-        math::checked_as_u64(amount as f64 * math::checked_powi(10.0, collateral_decimals as i32)?)?
+        let collateral_price_scaled = if position.collateral_custody == sol_custody.key() {
+            sol_price.scale_to_exponent(-6)?
+        } else {
+            usdc_price.scale_to_exponent(-6)?
+        };
+        
+        let amount_6_decimals = math::checked_div(
+            math::checked_mul(liquidator_reward_usd as u128, 1_000_000u128)?,
+            collateral_price_scaled.price as u128
+        )?;
+        
+        if collateral_decimals > 6 {
+            math::checked_as_u64(math::checked_mul(
+                amount_6_decimals,
+                math::checked_pow(10u128, (collateral_decimals - 6) as usize)?
+            )?)?
+        } else {
+            math::checked_as_u64(math::checked_div(
+                amount_6_decimals,
+                math::checked_pow(10u128, (6 - collateral_decimals) as usize)?
+            )?)?
+        }
     } else {
         0
     };
