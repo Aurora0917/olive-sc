@@ -173,7 +173,7 @@ pub fn add_collateral(
     
     // Recalculate liquidation price with new margin
     let new_liquidation_price = calculate_liquidation_price(
-        position.price,
+        position.entry_price,
         new_leverage,
         position.side
     )?;

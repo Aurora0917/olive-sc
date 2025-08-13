@@ -38,6 +38,13 @@ pub struct Pool {
     // Pool utilization tracking
     pub total_borrowed_usd: u128,
     pub last_utilization_update: i64,
+    
+    // Fixed rate tracking for futures and options (2D utilization)
+    pub total_future_notional_usd: u128,      // Total USD value of all open futures
+    pub total_future_time_value: u128,        // Sum of (notional * time_to_expiry) for all futures
+    pub total_option_notional_usd: u128,      // Total USD value of all open options
+    pub total_option_time_value: u128,        // Sum of (notional * time_to_expiry) for all options
+    pub last_fixed_rate_update: i64,          // Last time fixed rates were updated
 }
 
 impl Pool {
@@ -391,6 +398,172 @@ impl Pool {
             10,  // optimal_rate_pct
             30,  // max_rate_pct
         );
+        Ok(())
+    }
+
+    /// Calculate 2D utilization based on both current usage and time commitment
+    /// Formula: liquidity_time_taken / (TVL * 365 days)
+    pub fn calculate_2d_utilization(&self, _current_time: i64) -> Result<u64> {
+        // Total possible liquidity-time (AUM * 365 days in seconds)
+        let seconds_per_year = 365u128 * 24 * 3600; // 31,536,000 seconds
+        let total_possible = math::checked_mul(self.aum_usd, seconds_per_year)?;
+        
+        if total_possible == 0 {
+            return Ok(0);
+        }
+        
+        // Current liquidity-time taken by futures and options
+        let total_time_value = math::checked_add(
+            self.total_future_time_value,
+            self.total_option_time_value
+        )?;
+        
+        // Calculate 2D utilization as percentage in basis points
+        let utilization_2d = math::checked_div(
+            math::checked_mul(total_time_value, 10_000u128)?,
+            total_possible
+        )?;
+        
+        Ok(math::checked_as_u64(utilization_2d.min(10_000))?)
+    }
+    
+    /// Calculate fixed interest rate for new futures/options using 2D utilization
+    pub fn calculate_fixed_interest_rate(&self, _current_time: i64) -> Result<u32> {
+        // Get current variable rate (base rate from borrow curve - first point)
+        let base_rate_bps = self.borrow_rate_curve.points[0].borrow_rate_bps;
+        
+        // Get 2D utilization
+        let utilization_2d_bps = self.calculate_2d_utilization(_current_time)?;
+        
+        // Calculate premium based on 2D utilization curve
+        let fixed_rate_premium = self.calculate_fixed_rate_premium(utilization_2d_bps)?;
+        
+        // Fixed rate = base rate + premium based on 2D utilization
+        Ok(math::checked_add(base_rate_bps, fixed_rate_premium)?)
+    }
+    
+    /// Calculate premium for fixed rates based on 2D utilization
+    /// Implements exponential curve similar to Aave's stable rate mechanism
+    fn calculate_fixed_rate_premium(&self, utilization_2d_bps: u64) -> Result<u32> {
+        // Progressive rate increases based on 2D utilization
+        // This prevents exploitation while keeping rates reasonable
+        
+        match utilization_2d_bps {
+            0..=2000 => Ok(0),       // 0-20%: no premium
+            2001..=4000 => Ok(50),   // 20-40%: 0.5% premium
+            4001..=6000 => Ok(150),  // 40-60%: 1.5% premium
+            6001..=8000 => Ok(400),  // 60-80%: 4% premium
+            8001..=9000 => Ok(800),  // 80-90%: 8% premium
+            9001..=9500 => Ok(1500), // 90-95%: 15% premium
+            9501..=9800 => Ok(3000), // 95-98%: 30% premium
+            _ => Ok(5000),           // 98%+: 50% premium (very high to discourage)
+        }
+    }
+    
+    /// Add future position to pool tracking
+    pub fn add_future_position(
+        &mut self,
+        notional_usd: u64,
+        time_to_expiry_seconds: i64,
+        current_time: i64,
+    ) -> Result<u32> {
+        // Calculate and lock in the fixed rate
+        let fixed_rate_bps = self.calculate_fixed_interest_rate(current_time)?;
+        
+        // Update pool tracking
+        self.total_future_notional_usd = math::checked_add(
+            self.total_future_notional_usd,
+            notional_usd as u128
+        )?;
+        
+        let time_value = math::checked_mul(
+            notional_usd as u128,
+            time_to_expiry_seconds as u128
+        )?;
+        
+        self.total_future_time_value = math::checked_add(
+            self.total_future_time_value,
+            time_value
+        )?;
+        
+        self.last_fixed_rate_update = current_time;
+        
+        Ok(fixed_rate_bps)
+    }
+    
+    /// Remove future position from pool tracking
+    pub fn remove_future_position(
+        &mut self,
+        notional_usd: u64,
+        time_to_expiry_seconds: i64,
+        current_time: i64,
+    ) -> Result<()> {
+        // Remove from pool tracking
+        self.total_future_notional_usd = self.total_future_notional_usd
+            .saturating_sub(notional_usd as u128);
+        
+        let time_value = math::checked_mul(
+            notional_usd as u128,
+            time_to_expiry_seconds as u128
+        )?;
+        
+        self.total_future_time_value = self.total_future_time_value
+            .saturating_sub(time_value);
+        
+        self.last_fixed_rate_update = current_time;
+        
+        Ok(())
+    }
+    
+    /// Add option position to pool tracking (for future use)
+    pub fn add_option_position(
+        &mut self,
+        notional_usd: u64,
+        time_to_expiry_seconds: i64,
+        current_time: i64,
+    ) -> Result<u32> {
+        let fixed_rate_bps = self.calculate_fixed_interest_rate(current_time)?;
+        
+        self.total_option_notional_usd = math::checked_add(
+            self.total_option_notional_usd,
+            notional_usd as u128
+        )?;
+        
+        let time_value = math::checked_mul(
+            notional_usd as u128,
+            time_to_expiry_seconds as u128
+        )?;
+        
+        self.total_option_time_value = math::checked_add(
+            self.total_option_time_value,
+            time_value
+        )?;
+        
+        self.last_fixed_rate_update = current_time;
+        
+        Ok(fixed_rate_bps)
+    }
+    
+    /// Remove option position from pool tracking (for future use)
+    pub fn remove_option_position(
+        &mut self,
+        notional_usd: u64,
+        time_to_expiry_seconds: i64,
+        current_time: i64,
+    ) -> Result<()> {
+        self.total_option_notional_usd = self.total_option_notional_usd
+            .saturating_sub(notional_usd as u128);
+        
+        let time_value = math::checked_mul(
+            notional_usd as u128,
+            time_to_expiry_seconds as u128
+        )?;
+        
+        self.total_option_time_value = self.total_option_time_value
+            .saturating_sub(time_value);
+        
+        self.last_fixed_rate_update = current_time;
+        
         Ok(())
     }
 }

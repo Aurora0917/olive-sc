@@ -339,7 +339,7 @@ pub fn update_position_size(
     
     // Recalculate liquidation price
     let new_liquidation_price = calculate_liquidation_price(
-        position.price,
+        position.entry_price,
         new_leverage,
         position.side
     )?;

@@ -43,7 +43,7 @@ pub fn liquidate(
     msg!("SOL Price: {}", current_sol_price);
     msg!("USDC Price: {}", usdc_price_value);
     msg!("Liquidating position owned by: {}", position.owner);
-    msg!("Position entry price: {}", position.price);
+    msg!("Position entry price: {}", position.entry_price);
     msg!("Position liquidation price: {}", position.liquidation_price);
     msg!("Position side: {:?}", position.side);
     

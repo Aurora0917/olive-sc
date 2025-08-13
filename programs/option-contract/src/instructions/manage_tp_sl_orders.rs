@@ -67,19 +67,19 @@ pub fn manage_tp_sl_orders(
                 OrderAction::AddTakeProfit { price, .. } | 
                 OrderAction::UpdateTakeProfit { new_price: Some(price), .. } => {
                     match position.side {
-                        Side::Long => require!(*price > position.price, TradingError::InvalidTakeProfitPrice),
-                        Side::Short => require!(*price < position.price, TradingError::InvalidTakeProfitPrice),
+                        Side::Long => require!(*price > position.entry_price, TradingError::InvalidTakeProfitPrice),
+                        Side::Short => require!(*price < position.entry_price, TradingError::InvalidTakeProfitPrice),
                     }
                 },
                 OrderAction::AddStopLoss { price, .. } |
                 OrderAction::UpdateStopLoss { new_price: Some(price), .. } => {
                     match position.side {
                         Side::Long => {
-                            require!(*price < position.price, TradingError::InvalidStopLossPrice);
+                            require!(*price < position.entry_price, TradingError::InvalidStopLossPrice);
                             require!(*price > position.liquidation_price, TradingError::InvalidStopLossPrice);
                         },
                         Side::Short => {
-                            require!(*price > position.price, TradingError::InvalidStopLossPrice);
+                            require!(*price > position.entry_price, TradingError::InvalidStopLossPrice);
                             require!(*price < position.liquidation_price, TradingError::InvalidStopLossPrice);
                         }
                     }

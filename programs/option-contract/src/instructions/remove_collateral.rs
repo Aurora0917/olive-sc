@@ -88,7 +88,7 @@ pub fn remove_collateral(
     
     // Check if position would be liquidatable after removing collateral
     let new_liquidation_price = calculate_liquidation_price(
-        position.price,
+        position.entry_price,
         new_leverage,
         position.side
     )?;

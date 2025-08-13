@@ -829,7 +829,7 @@ const openOption_Call = async (
 //     program.programId
 //   );
 //   const [user] = PublicKey.findProgramAddressSync(
-//     [Buffer.from("user"), wallet.publicKey.toBuffer()],
+//     [Buffer.from("user_v3"), wallet.publicKey.toBuffer()],
 //     program.programId
 //   );
 //   const [lockedCustody] = PublicKey.findProgramAddressSync(
@@ -963,7 +963,7 @@ const exerciseOption_Call = async (_poolName: string, _index: number) => {
   );
 
   const [user] = PublicKey.findProgramAddressSync(
-    [Buffer.from("user"), wallet.publicKey.toBuffer()],
+    [Buffer.from("user_v3"), wallet.publicKey.toBuffer()],
     program.programId
   );
 

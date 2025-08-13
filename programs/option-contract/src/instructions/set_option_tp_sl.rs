@@ -126,7 +126,7 @@ pub struct SetOptionTpSl<'info> {
 
     #[account(
         mut,
-        seeds = [b"user", owner.key().as_ref()],
+        seeds = [b"user_v3", owner.key().as_ref()],
         bump = user.bump
     )]
     pub user: Box<Account<'info, User>>,

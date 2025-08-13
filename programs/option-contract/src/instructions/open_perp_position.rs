@@ -266,7 +266,7 @@ pub fn open_perp_position(
     }
 
     // Initialize position
-    position.index = user.perp_position_count.checked_add(1).unwrap_or(1);
+    position.index = user.perp_position_index.checked_add(1).unwrap_or(1);
     position.owner = owner.key();
     position.pool = pool.key();
     position.custody = sol_custody.key(); // Position always tracks SOL
@@ -274,7 +274,7 @@ pub fn open_perp_position(
     position.order_type = params.order_type;
     position.side = params.side;
     position.is_liquidated = false;
-    position.price = entry_price;
+    position.entry_price = entry_price;
     position.size_usd = size_usd;
     position.collateral_usd = collateral_usd;
     position.open_time = current_time;
@@ -324,7 +324,7 @@ pub fn open_perp_position(
     }
 
     // Update user stats
-    user.perp_position_count = user.perp_position_count.checked_add(1).unwrap_or(1);
+    user.perp_position_index = user.perp_position_index.checked_add(1).unwrap_or(1);
 
     emit!(PerpPositionOpened {
         index: position.index,
@@ -336,7 +336,7 @@ pub fn open_perp_position(
         order_type: position.order_type as u8,
         side: position.side as u8,
         is_liquidated: position.is_liquidated,
-        price: position.price,
+        price: position.entry_price,
         size_usd: position.size_usd,
         collateral_usd: position.collateral_usd,
         open_time: position.open_time,
@@ -394,7 +394,7 @@ pub struct OpenPerpPosition<'info> {
         init_if_needed,
         payer = owner,
         space = User::LEN,
-        seeds = [b"user", owner.key().as_ref()],
+        seeds = [b"user_v3", owner.key().as_ref()],
         bump,
     )]
     pub user: Box<Account<'info, User>>,
@@ -406,7 +406,7 @@ pub struct OpenPerpPosition<'info> {
         seeds = [
             b"position",
             owner.key().as_ref(),
-            (user.perp_position_count + 1).to_le_bytes().as_ref(),
+            (user.perp_position_index + 1).to_le_bytes().as_ref(),
             pool.key().as_ref()
         ],
         bump

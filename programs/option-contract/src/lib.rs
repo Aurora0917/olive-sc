@@ -8,6 +8,7 @@ pub mod events;
 pub mod instructions;
 pub mod math;
 pub mod state;
+pub mod traits;
 pub mod utils;
 
 declare_id!("FFu3iJVJabfX4MuUmeyFpqk9YghMpqLKmKdoNRsVmuW");
@@ -192,6 +193,36 @@ pub mod option_contract {
     // Execute TP/SL order - dedicated instruction for keepers
     pub fn execute_tp_sl_order(ctx: Context<ExecuteTpSlOrder>, params: ExecuteTpSlOrderParams) -> Result<()> {
         instructions::execute_tp_sl_order::execute_tp_sl_order(ctx, &params)
+    }
+
+    // Open future position with fixed interest rate
+    pub fn open_future(ctx: Context<OpenFuture>, params: OpenFutureParams) -> Result<()> {
+        instructions::open_future::open_future(ctx, &params)
+    }
+
+    // Open limit future position (executed when price hits trigger)
+    pub fn open_limit_future(ctx: Context<OpenLimitFuture>, params: OpenLimitFutureParams) -> Result<()> {
+        instructions::open_limit_future::open_limit_future(ctx, &params)
+    }
+
+    // Execute limit future when trigger conditions are met
+    pub fn execute_limit_future(ctx: Context<ExecuteLimitFuture>, params: ExecuteLimitFutureParams) -> Result<()> {
+        instructions::execute_limit_future::execute_limit_future(ctx, &params)
+    }
+
+    // Close future position (partial or full)
+    pub fn close_future(ctx: Context<CloseFuture>, params: CloseFutureParams) -> Result<()> {
+        instructions::close_future::close_future(ctx, &params)
+    }
+
+    // Settle expired future (can be called by anyone - keeper pattern)
+    pub fn settle_expired_future(ctx: Context<SettleExpiredFuture>, params: SettleExpiredFutureParams) -> Result<()> {
+        instructions::settle_expired_future::settle_expired_future(ctx, &params)
+    }
+
+    // Claim settlement from expired/liquidated future
+    pub fn claim_future(ctx: Context<ClaimFuture>, params: ClaimFutureParams) -> Result<()> {
+        instructions::claim_future::claim_future(ctx, &params)
     }
 
 }

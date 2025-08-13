@@ -1,5 +1,6 @@
 use crate::{
     math::{self},
+    traits::TradingPosition,
 };
 use anchor_lang::prelude::*;
 
@@ -43,7 +44,7 @@ pub struct Position {
     pub is_liquidated: bool,
     
     // Core Position Data
-    pub price: u64,                          // Entry price (scaled) - for limit: trigger price
+    pub entry_price: u64,                    // Entry price (scaled) - for limit: trigger price
     pub size_usd: u64,                       // Position size in USD
     pub collateral_usd: u64,                // Collateral value in USD at open
     pub open_time: i64,                     // When position was created
@@ -192,7 +193,7 @@ impl Position {
     
     pub fn execute_limit_order(&mut self, execution_price: u64, current_time: i64) -> Result<()> {
         self.order_type = OrderType::Market;
-        self.price = execution_price;
+        self.entry_price = execution_price;
         self.trigger_price = None;
         self.execution_time = Some(current_time);  // Track when limit order was executed
         self.update_time = current_time;
@@ -260,15 +261,68 @@ impl Position {
     
     pub fn calculate_pnl(&self, current_price: u64) -> Result<i64> {
         let price_diff = match self.side {
-            Side::Long => current_price as i64 - self.price as i64,
-            Side::Short => self.price as i64 - current_price as i64,
+            Side::Long => current_price as i64 - self.entry_price as i64,
+            Side::Short => self.entry_price as i64 - current_price as i64,
         };
         
         let pnl = math::checked_div(
             math::checked_mul(price_diff as i128, self.size_usd as i128)?,
-            self.price as i128,
+            self.entry_price as i128,
         )?;
         
         Ok(pnl as i64)
     }    
+}
+
+// Implement TradingPosition trait for Position (perpetuals)
+impl TradingPosition for Position {
+    fn calculate_pnl(&self, current_price: u64) -> Result<i64> {
+        self.calculate_pnl(current_price)
+    }
+    
+    fn is_liquidatable(&self, current_price: u64) -> Result<bool> {
+        Ok(self.is_liquidatable(current_price))
+    }
+    
+    fn get_collateral_ratio(&self) -> Result<f64> {
+        if self.size_usd == 0 {
+            return Ok(0.0);
+        }
+        Ok((self.collateral_usd as f64) / (self.size_usd as f64))
+    }
+    
+    fn get_leverage(&self) -> Result<f64> {
+        if self.collateral_usd == 0 {
+            return Ok(0.0);
+        }
+        Ok((self.size_usd as f64) / (self.collateral_usd as f64))
+    }
+    
+    fn get_reference_price(&self) -> u64 {
+        self.entry_price
+    }
+    
+    fn get_size_usd(&self) -> u64 {
+        self.size_usd
+    }
+    
+    fn get_collateral_usd(&self) -> u64 {
+        self.collateral_usd
+    }
+    
+    fn get_side(&self) -> Side {
+        self.side
+    }
+    
+    fn get_liquidation_price(&self) -> u64 {
+        self.liquidation_price
+    }
+    
+    fn is_active(&self) -> bool {
+        self.order_type == OrderType::Market && !self.is_liquidated
+    }
+    
+    fn update_timestamp(&mut self, current_time: i64) {
+        self.update_time = current_time;
+    }
 }

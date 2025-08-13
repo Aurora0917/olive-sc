@@ -267,7 +267,7 @@ pub fn cancel_limit_order(
         order_type: position.order_type as u8,
         side: position.side as u8,
         is_liquidated: position.is_liquidated,
-        price: position.price,
+        price: position.entry_price,
         size_usd: position.size_usd,
         collateral_usd: position.collateral_usd,
         open_time: position.open_time,

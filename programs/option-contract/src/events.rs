@@ -560,3 +560,123 @@ pub struct BorrowFeesUpdated {
     pub new_interest_snapshot: u128,
     pub update_time: i64,
 }
+
+// Future trading events
+#[event]
+pub struct FutureOpened {
+    pub owner: Pubkey,
+    pub future_key: Pubkey,
+    pub index: u64,
+    pub pool: Pubkey,
+    pub custody: Pubkey,
+    pub collateral_custody: Pubkey,
+    pub side: u8,
+    pub size_usd: u64,
+    pub collateral_usd: u64,
+    pub collateral_amount: u64,
+    pub entry_price: u64,
+    pub future_price: u64,
+    pub fixed_interest_rate_bps: u32,
+    pub expiry_time: i64,
+    pub liquidation_price: u64,
+    pub locked_amount: u64,
+    pub open_time: i64,
+}
+
+#[event]
+pub struct FutureClosed {
+    pub owner: Pubkey,
+    pub future_key: Pubkey,
+    pub index: u64,
+    pub side: u8,
+    pub close_percentage: u64,
+    pub closed_size_usd: u64,
+    pub collateral_usd: u64,
+    pub collateral_amount: u64,
+    pub locked_amount: u64,
+    pub native_exit_amount: u64,
+    pub trade_fees: u64,
+    pub remaining_size_usd: u64,
+    pub settlement_amount: u64,
+    pub settlement_tokens: u64,
+    pub pnl: i64,
+    pub current_spot_price: u64,
+    pub close_time: i64,
+}
+
+#[event]
+pub struct FutureSettled {
+    pub owner: Pubkey,
+    pub future_key: Pubkey,
+    pub index: u64,
+    pub side: u8,
+    pub size_usd: u64,
+    pub settlement_price: u64,
+    pub original_future_price: u64,
+    pub pnl: i64,
+    pub settlement_amount: u64,
+    pub settlement_tokens: u64,
+    pub expiry_time: i64,
+    pub settlement_time: i64,
+}
+
+#[event]
+pub struct FutureClaimed {
+    pub owner: Pubkey,
+    pub future_key: Pubkey,
+    pub index: u64,
+    pub side: u8,
+    pub settlement_amount: u64,
+    pub claim_tokens: u64,
+    pub pnl: i64,
+    pub settlement_price: u64,
+    pub claim_time: i64,
+}
+
+#[event]
+pub struct FutureAccountClosed {
+    pub owner: Pubkey,
+    pub future_key: Pubkey,
+    pub index: u64,
+    pub rent_refunded: u64,
+}
+
+#[event]
+pub struct LimitFutureOpened {
+    pub owner: Pubkey,
+    pub future_key: Pubkey,
+    pub index: u64,
+    pub pool: Pubkey,
+    pub custody: Pubkey,
+    pub collateral_custody: Pubkey,
+    pub side: u8,
+    pub size_usd: u64,
+    pub collateral_usd: u64,
+    pub collateral_amount: u64,
+    pub trigger_price: u64,
+    pub trigger_above_threshold: bool,
+    pub future_price: u64,
+    pub fixed_interest_rate_bps: u32,
+    pub expiry_time: i64,
+    pub max_slippage: u64,
+    pub open_time: i64,
+}
+
+#[event]
+pub struct LimitFutureExecuted {
+    pub owner: Pubkey,
+    pub future_key: Pubkey,
+    pub index: u64,
+    pub pool: Pubkey,
+    pub custody: Pubkey,
+    pub collateral_custody: Pubkey,
+    pub side: u8,
+    pub size_usd: u64,
+    pub trigger_price: u64,
+    pub execution_price: u64,
+    pub future_price: u64,
+    pub liquidation_price: u64,
+    pub execution_time: i64,
+    pub expiry_time: i64,
+    pub locked_amount: u64,
+}

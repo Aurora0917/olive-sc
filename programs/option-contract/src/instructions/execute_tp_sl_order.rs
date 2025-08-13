@@ -327,7 +327,7 @@ pub fn execute_tp_sl_order(
     let position_collateral_custody = position.collateral_custody;
     let position_order_type = position.order_type as u8;
     let position_side = position.side as u8;
-    let position_entry_price = position.price;
+    let position_entry_price = position.entry_price;
     let position_size_usd = position.size_usd;
     let position_collateral_usd = position.collateral_usd;
     let position_collateral_amount = position.collateral_amount;

@@ -5,8 +5,9 @@ pub use contract::*;
 pub use oracle::*;
 pub use pool::*;
 pub use custody::*;
-pub use perpetuals::*;
+pub use perpetuals::{Position, OrderType, Side};
 pub use tp_sl_orderbook::*;
+pub use future::*;
 
 pub mod option;
 pub mod user;
@@ -17,3 +18,4 @@ pub mod pool;
 pub mod custody;
 pub mod perpetuals;
 pub mod tp_sl_orderbook;
+pub mod future;

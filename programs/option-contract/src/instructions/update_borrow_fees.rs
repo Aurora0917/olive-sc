@@ -1,7 +1,7 @@
 use crate::{
     errors::PerpetualError,
     events::BorrowFeesUpdated,
-    state::{Contract, Custody, Pool, Position, OrderType},
+    state::{Contract, Custody, Pool, Position, OrderType, Side},
 };
 use anchor_lang::prelude::*;
 
@@ -43,8 +43,8 @@ pub fn update_borrow_fees(
     
     // Get relevant custody for logging
     let relevant_custody = match position.side {
-        crate::state::Side::Long => sol_custody.as_ref(),  // Long positions borrow SOL
-        crate::state::Side::Short => usdc_custody.as_ref(), // Short positions borrow USDC
+        Side::Long => sol_custody.as_ref(),  // Long positions borrow SOL
+        Side::Short => usdc_custody.as_ref(), // Short positions borrow USDC
     };
     let current_borrow_rate = pool.get_token_borrow_rate(relevant_custody)?;
     let current_borrow_rate_bps = current_borrow_rate.to_bps().unwrap_or(0u32);

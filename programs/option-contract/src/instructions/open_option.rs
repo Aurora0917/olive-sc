@@ -253,7 +253,7 @@ pub struct OpenOption<'info> {
     init_if_needed,
     payer = owner,
     space=User::LEN,
-    seeds = [b"user", owner.key().as_ref()],
+    seeds = [b"user_v3", owner.key().as_ref()],
     bump,
   )]
     pub user: Box<Account<'info, User>>,

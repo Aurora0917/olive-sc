@@ -286,3 +286,52 @@ pub enum MultiSigError {
     #[msg("Multisig already executed")]
     MultisigAlreadyExecuted,
 }
+
+// Future-specific errors
+#[error_code]
+pub enum FutureError {
+    #[msg("Future has expired")]
+    FutureExpired,
+    #[msg("Future has not yet expired")]
+    FutureNotYetExpired,
+    #[msg("Future has not expired yet")]
+    FutureNotExpired,
+    #[msg("Future is not active")]
+    FutureNotActive,
+    #[msg("Future has already been settled")]
+    FutureAlreadySettled,
+    #[msg("Future cannot be liquidated")]
+    FutureNotLiquidatable,
+    #[msg("Invalid expiry time - must be in the future")]
+    InvalidExpiryTime,
+    #[msg("Invalid future size")]
+    InvalidFutureSize,
+    #[msg("Future size too small")]
+    FutureSizeTooSmall,
+    #[msg("Future size too large")]
+    FutureSizeTooLarge,
+    #[msg("Maximum leverage exceeded for futures")]
+    MaxFutureLeverageExceeded,
+    #[msg("Insufficient collateral for future position")]
+    InsufficientCollateralForFuture,
+    #[msg("Invalid fixed interest rate")]
+    InvalidFixedInterestRate,
+    #[msg("Future settlement not yet available")]
+    SettlementNotAvailable,
+    #[msg("Settlement amount calculation failed")]
+    SettlementCalculationFailed,
+    #[msg("Future must be expired or liquidated before claiming")]
+    FutureNotClaimable,
+    #[msg("Nothing to claim for this future")]
+    NothingToClaim,
+    #[msg("Expiry time too far in the future")]
+    ExpiryTooFar,
+    #[msg("Expiry time too close")]
+    ExpiryTooClose,
+    #[msg("Future is not in pending status")]
+    FutureNotPending,
+    #[msg("No trigger price set for this future")]
+    NoTriggerPrice,
+    #[msg("Trigger condition not met")]
+    TriggerConditionNotMet,
+}

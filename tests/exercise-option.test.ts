@@ -64,7 +64,7 @@ describe("Exercise Option Test - Based on Rust Code", () => {
     );
 
     const [userPDA] = PublicKey.findProgramAddressSync(
-      [Buffer.from("user"), userWallet.publicKey.toBuffer()],
+      [Buffer.from("user_v3"), userWallet.publicKey.toBuffer()],
       program.programId
     );
 
@@ -264,7 +264,7 @@ describe("Exercise Option Test - Based on Rust Code", () => {
     );
 
     const [userPDA] = PublicKey.findProgramAddressSync(
-      [Buffer.from("user"), userWallet.publicKey.toBuffer()],
+      [Buffer.from("user_v3"), userWallet.publicKey.toBuffer()],
       program.programId
     );
 
